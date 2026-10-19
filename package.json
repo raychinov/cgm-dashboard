@@ -1,0 +1,25 @@
+{
+  "name": "cgm-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CGM kiosk dashboard for an old phone: static files on GitHub Pages, the browser talks to Dexcom Share directly. Credentials never leave the phone.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "serve -l 8787 .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:snapshots": "SNAPSHOTS=1 playwright test tests/e2e/layout.spec.ts",
+    "screenshots": "SCREENSHOTS=1 playwright test tests/e2e/screenshots.spec.ts",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "serve": "^14.2.6",
+    "typescript": "^5.6.0",
+    "vitest": "~2.1.0"
+  }
+}

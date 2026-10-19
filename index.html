@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://share2.dexcom.com https://shareous1.dexcom.com https://share.dexcom.jp; img-src 'self' data:; media-src data:; base-uri 'none'; form-action 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="CGM">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23111' width='100' height='100' rx='20'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='%2300cc00'>G</text></svg>">
+<link rel="stylesheet" href="./style.css">
+<title>CGM</title>
+</head>
+<body>
+<div id="setup">
+  <form id="setup-form">
+    <h1>CGM Dashboard</h1>
+    <p class="hint">Use the same account as the Dexcom mobile app. Credentials stay in this browser and go straight to Dexcom &mdash; there is no server in between.</p>
+    <label for="setup-username">Dexcom username</label>
+    <input id="setup-username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+    <label for="setup-password">Password</label>
+    <input id="setup-password" type="password" autocomplete="current-password">
+    <label for="setup-server">Region</label>
+    <select id="setup-server">
+      <option value="ous">Outside US (OUS) — UK, EU, AU, rest of world</option>
+      <option value="us">United States (US)</option>
+      <option value="jp">Japan (JP)</option>
+    </select>
+    <button id="setup-save" type="submit">Connect</button>
+    <div class="error-msg" id="setup-error" role="alert"></div>
+  </form>
+</div>
+<div id="overlay" class="hidden"><span>Tap to start</span></div>
+<div id="banner"></div>
+<div id="top-bar">
+  <div id="clock"><div id="clock-time"></div><div id="clock-date"></div></div>
+  <div id="reading-area">
+    <div id="glucose-row"><span id="glucose">---</span><span id="trend"></span></div>
+    <div id="meta">&nbsp;</div>
+  </div>
+</div>
+<div id="graph-area">
+  <div id="graph-container"><canvas id="graph"></canvas></div>
+  <div id="x-labels"><span>-3h</span><span>-2h</span><span>-1h</span><span>now</span></div>
+</div>
+<div id="reset-zone"></div>
+<video id="nosleep" playsinline loop muted></video>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
