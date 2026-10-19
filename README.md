@@ -28,9 +28,20 @@ Dexcom. Nothing is stored on GitHub or anywhere else.
    Dexcom only serves live readings for accounts that share. A second
    email address you own works as the follower. In the Dexcom G6/G7
    app: `Connections → Share`.
-3. A **GitHub account** (free).
+3. A **GitHub account** (free), only if you want your own copy.
 
-## Set up
+## Use it
+
+**The quick way:** open **https://raychinov.github.io/cgm-dashboard/**
+on the phone, enter the Dexcom username, password and region (**OUS**
+for everyone outside the US and Japan), tap **Connect**. That's it.
+The page runs entirely in the phone's browser and sends the credentials
+to Dexcom only; nothing goes to this site's host. You are trusting that
+the page stays that way, which you can check in the source here at any
+time.
+
+**Your own copy:** if you'd rather control the code yourself, fork it
+and host it on your GitHub account:
 
 1. Click **Fork** at the top of this page, keep the name
    `cgm-dashboard`, create the fork.
@@ -39,12 +50,12 @@ Dexcom. Nothing is stored on GitHub or anywhere else.
    `/ (root)`, then **Save**.
 3. Wait a minute, reload the Pages settings, and open the URL it shows:
    `https://<your-github-name>.github.io/cgm-dashboard/`
-4. Open that URL on the phone. Enter the Dexcom username, password and
-   region (**OUS** for everyone outside the US and Japan). Tap
-   **Connect**.
-5. Readings appear within a few seconds. On Android, tap once to go
-   fullscreen. iPhones don't allow fullscreen web pages; use *Add to
-   Home Screen* (below) instead.
+4. Open that URL on the phone, enter the Dexcom username, password and
+   region, tap **Connect**.
+
+Either way, readings appear within a few seconds. On Android, tap once
+to go fullscreen. iPhones don't allow fullscreen web pages; use *Add to
+Home Screen* (below) instead.
 
 ## Using it
 
@@ -105,12 +116,13 @@ again after a reload. That means:
 
 - Anyone who can unlock the phone can use the dashboard. Double-tap
   the corner to log out before handing it to someone else.
-- On GitHub Pages, local storage belongs to `<you>.github.io` as a
-  whole, so any other Pages site you publish under the same account
-  could read it. Keep this the only Pages site on the account, or host
-  it on its own domain.
-- Whoever can push to the fork can change the page. Only run a fork
-  you control.
+- On GitHub Pages, local storage belongs to the whole `<account>.github.io`
+  origin, so any other Pages site published under the same account
+  could read it. The author's account hosts nothing else; if you run
+  your own copy, keep it the only Pages site on that account or give
+  it its own domain.
+- Whoever can push to the site you use can change the page. Use this
+  one if you trust it, or run a fork you control.
 
 ## Development
 
