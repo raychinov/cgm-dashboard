@@ -125,8 +125,15 @@ the next ordinary push.
   Everything else is a server problem and must not log the kiosk out.
 - **Follower requirement is a Dexcom setting, not a code issue.**
   "Auth works, no readings" means no follower is configured.
-- **Banner priority.** `error` beats `stale`; only a successful fetch
-  clears `error`.
+- **Banner priority.** `error` beats `stale`, but an error banner
+  carries "last reading N min ago" once the reading is stale, and the
+  number and trend go grey (`body.stale`) whatever the banner says.
+  Only a successful fetch clears `error`.
+- **Readings are never replaced by nothing.** An empty answer from
+  Dexcom keeps the last known readings so STALE keeps counting; the
+  last value stays on screen, greyed, however old it gets. The age is
+  the larger of "clock minus timestamp" and "time since first seen"
+  (`cgm.seen`), so a phone clock running behind cannot hide staleness.
 - **Graph y-range is dynamic.** `graphRange` keeps 20 mg/dL above the
   higher of `urgentHigh` and the highest visible reading.
 - **Text is sized by measurement, not breakpoints.** `fitText` in

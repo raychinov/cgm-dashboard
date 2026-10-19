@@ -47,6 +47,7 @@ body.layout-compact #graph-area { display: none; }
 .color-urgent-low { color: #8B0000; } .color-low { color: #8B8000; }
 .color-in-range { color: #008000; } .color-high { color: #8B8000; }
 .color-urgent-high { color: #8B0000; }
+body.stale #glucose, body.stale #trend { color: #777; }
 #setup { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: flex; overflow-y: auto; z-index: 110; }
 #setup.hidden { display: none; }
 #setup-form { display: flex; flex-direction: column; gap: 14px; width: min(90vw, 360px); margin: auto; padding: 16px 0; }

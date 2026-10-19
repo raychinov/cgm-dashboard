@@ -61,11 +61,12 @@ export function normalizeReadings(raw) {
   return [...byTs.values()].sort((a, b) => a.ts - b.ts);
 }
 
-export function summarize(readings, now, staleMinutes) {
+export function summarize(readings, now, staleMinutes, seenAt = NaN) {
   if (!readings.length) return null;
   const latest = readings[readings.length - 1];
   const prev = readings[readings.length - 2];
-  const ageMin = Math.max(0, Math.floor((now - latest.ts) / 60_000));
+  const sinceSeen = Number.isFinite(seenAt) ? now - seenAt : 0;
+  const ageMin = Math.max(0, Math.floor(Math.max(now - latest.ts, sinceSeen) / 60_000));
   const delta = prev && latest.ts - prev.ts <= MAX_DELTA_GAP_MS ? latest.mgdl - prev.mgdl : null;
   return { latest, ageMin, delta, stale: ageMin >= staleMinutes };
 }

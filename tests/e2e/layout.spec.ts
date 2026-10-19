@@ -16,7 +16,7 @@ function layoutProblems() {
     if (b.left < -1 || b.top < -1 || b.right > W + 1 || b.bottom > H + 1) problems.push(`${id} outside viewport`);
     if (el.scrollWidth > el.clientWidth + 1) problems.push(`${id} text clipped`);
   }
-  const layout = document.body.className.replace("layout-", "") || "full";
+  const layout = document.body.classList.contains("layout-focus") ? "focus" : document.body.classList.contains("layout-compact") ? "compact" : "full";
   for (const id of ["glucose-row", "glucose", "trend", "meta"]) if (!rects[id]) problems.push(`${id} missing`);
   if (layout !== "focus" && !rects["clock-time"]) problems.push("clock missing");
   const overlaps = (a?: typeof rects[string], b?: typeof rects[string]) => a && b && !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);

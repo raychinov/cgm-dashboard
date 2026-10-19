@@ -114,6 +114,64 @@ test("stale readings raise the STALE banner", async ({ page }) => {
   await expect(page.locator("#banner")).toHaveText("STALE (20 min)");
 });
 
+test("an empty answer keeps the last reading, which goes grey and STALE as it ages", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+
+  stub.read = () => ({ status: 200, body: [] });
+  await unlock(page);
+  await expect.poll(() => stub.calls.read).toBe(2);
+
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await expect(page.locator("#banner")).toBeHidden();
+  await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(139, 0, 0)");
+
+  await page.clock.fastForward(14 * 60_000);
+  await expect(page.locator("#banner")).toHaveText("STALE (16 min)");
+  await expect(page.locator("body")).toHaveClass(/stale/);
+  await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(119, 119, 119)");
+  await expect(page.locator("#trend")).toHaveCSS("color", "rgb(119, 119, 119)");
+  await expect(page.locator("#meta")).toHaveText("+2.5 · 16 min ago");
+
+  await page.clock.fastForward(4 * 60 * 60_000);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await expect(page.locator("#banner")).toHaveText("STALE (256 min)");
+});
+
+test("NO DATA names the age of the last reading once it is stale", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+
+  stub.read = dexcomFailure("InvalidArgument");
+  await unlock(page);
+  await expect(page.locator("#banner")).toHaveText("NO DATA");
+
+  await page.clock.fastForward(14 * 60_000);
+  await expect(page.locator("#banner")).toHaveText("NO DATA · last reading 16 min ago");
+  await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(119, 119, 119)");
+
+  stub.read = () => ({ status: 200, body: readings(RISING, BASE_TIME + 16 * 60_000) });
+  await unlock(page);
+  await expect(page.locator("#banner")).toBeHidden();
+  await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(139, 0, 0)");
+});
+
+test("a phone clock that runs behind cannot hide staleness", async ({ page }) => {
+  await stubDexcom(page, { read: () => ({ status: 200, body: readings(RISING, BASE_TIME + 60 * 60_000) }) });
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#meta")).toHaveText("+2.5 · 0 min ago");
+
+  await page.clock.fastForward(16 * 60_000);
+
+  await expect(page.locator("#banner")).toHaveText("STALE (16 min)");
+  await expect(page.locator("body")).toHaveClass(/stale/);
+});
+
 test("a failed refresh shows NO DATA, keeps the last reading, and waits the slow interval", async ({ page }) => {
   const stub = await stubDexcom(page);
   await page.goto("/");

@@ -111,7 +111,7 @@ charging at 80% if the phone supports it.
 | *NO DATA · logins paused N min* | Dexcom's login service answered with an error. The page waits before sending the password again (5, then 15, then 60 minutes). |
 | *LOGGED OUT · …* | Dexcom rejected the saved login. Polling has stopped. Tap to retry once; if the password changed, clear the site's data and set up again. |
 | *Dexcom error: …* | Dexcom answered with something unexpected. Try again in a minute; if it persists, open an issue with the code shown. |
-| *STALE (N min)* | Dexcom has not published a new reading. Usually the sensor phone lost its connection. |
+| *STALE (N min)*, number turns grey | Dexcom has not published a new reading for N minutes. Usually the sensor phone lost its connection. The last reading stays on screen, greyed, however old it gets. |
 
 ## Privacy
 

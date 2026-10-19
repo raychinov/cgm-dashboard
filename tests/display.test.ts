@@ -115,6 +115,13 @@ describe("summarize", () => {
     expect(summarize([{ ts: now + 2 * MIN, mgdl: 100, trend: 4 }], now, 15)).toMatchObject({ ageMin: 0, stale: false });
   });
 
+  it("uses the time since the reading was first seen when the clock says it is younger", () => {
+    const readings = [{ ts: now - 2 * MIN, mgdl: 100, trend: 4 }];
+    expect(summarize(readings, now, 15, now - 20 * MIN)).toMatchObject({ ageMin: 20, stale: true });
+    expect(summarize(readings, now, 15, now - 1 * MIN)).toMatchObject({ ageMin: 2, stale: false });
+    expect(summarize(readings, now, 15, NaN)).toMatchObject({ ageMin: 2, stale: false });
+  });
+
   it("omits the delta when the previous reading is too old to compare", () => {
     const readings = [
       { ts: now - 40 * MIN, mgdl: 100, trend: 4 },

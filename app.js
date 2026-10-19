@@ -20,6 +20,7 @@ const CONFIG = {
   maxCount: 36,
 };
 const LAG_KEY = "cgm.lag";
+const SEEN_KEY = "cgm.seen";
 
 const $ = (id) => document.getElementById(id);
 const $glucose = $("glucose"), $trend = $("trend"), $meta = $("meta"), $banner = $("banner");
@@ -30,8 +31,10 @@ const $clockTime = $("clock-time"), $clockDate = $("clock-date");
 const $clock = $("clock"), $readingArea = $("reading-area"), $glucoseRow = $("glucose-row");
 
 let readings = [];
-let latestSeenTs = 0;
+let seen = loadSeen();
+let seenThisSession = false;
 let lagMs = loadLag();
+let errorText = "";
 let refreshTimer = null;
 let running = false;
 let run = 0;
@@ -42,6 +45,32 @@ let hintTimer = null;
 function loadLag() {
   const stored = Number(localStorage.getItem(LAG_KEY));
   return localStorage.getItem(LAG_KEY) !== null && !Number.isNaN(stored) ? stored : CONFIG.readingLagMs;
+}
+
+function loadSeen() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SEEN_KEY));
+    return stored && typeof stored.ts === "number" && typeof stored.at === "number" ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function noteSeen(now) {
+  if (!readings.length) return;
+  const newest = readings[readings.length - 1].ts;
+  if (seen && newest <= seen.ts) return;
+  if (seenThisSession) {
+    lagMs = nextLagEstimate(lagMs, now - newest);
+    localStorage.setItem(LAG_KEY, String(lagMs));
+  }
+  seen = { ts: newest, at: now };
+  seenThisSession = true;
+  localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+}
+
+function seenAtForLatest() {
+  return readings.length && seen && seen.ts === readings[readings.length - 1].ts ? seen.at : NaN;
 }
 
 function showSetupError(msg) { $err.textContent = msg; $err.style.display = "block"; }
@@ -112,7 +141,7 @@ async function submitCreds(e) {
     }
     setCreds(creds);
     readings = normalizeReadings(data);
-    latestSeenTs = readings.length ? readings[readings.length - 1].ts : 0;
+    noteSeen(Date.now());
     clearError();
     updateDisplay();
     $setup.classList.add("hidden");
@@ -129,16 +158,6 @@ async function submitCreds(e) {
 }
 $form.addEventListener("submit", submitCreds);
 
-function learnLag(now) {
-  if (!readings.length) return;
-  const newest = readings[readings.length - 1].ts;
-  if (latestSeenTs && newest > latestSeenTs) {
-    lagMs = nextLagEstimate(lagMs, now - newest);
-    localStorage.setItem(LAG_KEY, String(lagMs));
-  }
-  latestSeenTs = Math.max(latestSeenTs, newest);
-}
-
 async function fetchReadings() {
   const creds = getCreds();
   if (!creds) return false;
@@ -146,8 +165,11 @@ async function fetchReadings() {
   try {
     const data = await getReadings({ ...creds, minutes: CONFIG.minutes, maxCount: CONFIG.maxCount });
     if (thisRun !== run) return false;
-    readings = normalizeReadings(data);
-    learnLag(Date.now());
+    const fresh = normalizeReadings(data);
+    if (fresh.length) {
+      readings = fresh;
+      noteSeen(Date.now());
+    }
     clearError();
     updateDisplay();
     return true;
@@ -201,8 +223,13 @@ function fitText() {
 }
 
 function renderBanner(summary) {
-  if ($banner.className === "error") return;
-  if (summary && summary.stale) {
+  const stale = Boolean(summary && summary.stale);
+  document.body.classList.toggle("stale", stale);
+  if ($banner.className === "error") {
+    $banner.textContent = stale ? `${errorText} · last reading ${summary.ageMin} min ago` : errorText;
+    return;
+  }
+  if (stale) {
     $banner.textContent = "STALE (" + summary.ageMin + " min)";
     $banner.className = "stale";
   } else if ($banner.className === "stale") {
@@ -212,7 +239,7 @@ function renderBanner(summary) {
 }
 
 function renderMeta() {
-  const summary = summarize(readings, Date.now(), CONFIG.staleMinutes);
+  const summary = summarize(readings, Date.now(), CONFIG.staleMinutes, seenAtForLatest());
   if (summary) {
     const deltaStr = summary.delta === null ? "" : formatDelta(summary.delta, CONFIG.units) + " · ";
     $meta.textContent = deltaStr + summary.ageMin + " min ago";
@@ -293,8 +320,8 @@ function drawGraph() {
   }
 }
 
-function showError(msg) { $banner.textContent = msg; $banner.className = "error"; }
-function clearError() { if ($banner.className === "error") { $banner.className = ""; $banner.textContent = ""; } }
+function showError(msg) { errorText = msg; $banner.textContent = msg; $banner.className = "error"; }
+function clearError() { if ($banner.className === "error") { errorText = ""; $banner.className = ""; $banner.textContent = ""; } }
 
 const SILENT_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMqbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2Mi4xMS4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMAEDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAABPgAAAAAAAAABhzdHRzAAAAAAAAAAEAAAACAAAgAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACcgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWgAAAGF1ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjIuMy4xMDAAAAAIZnJlZQAAAoRtZGF0AAACXwYF//9b3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTIga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9MiByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAALZYiEBTyYoAA/v4AAAAAGQZo4CXqA";
 
