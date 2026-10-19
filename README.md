@@ -118,9 +118,9 @@ again after a reload. That means:
   the corner to log out before handing it to someone else.
 - On GitHub Pages, local storage belongs to the whole `<account>.github.io`
   origin, so any other Pages site published under the same account
-  could read it. The author's account hosts nothing else; if you run
-  your own copy, keep it the only Pages site on that account or give
-  it its own domain.
+  could read it. This is the only Pages site on the author's account,
+  deliberately; if you run your own copy, keep it the only Pages site
+  on that account or give it its own domain.
 - Whoever can push to the site you use can change the page. Use this
   one if you trust it, or run a fork you control.
 
