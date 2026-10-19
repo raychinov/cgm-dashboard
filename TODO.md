@@ -18,7 +18,6 @@
 
 - [ ] Settings UI for thresholds, units and the night window
       (currently `CONFIG` in `app.js`).
-- [ ] PNG `apple-touch-icon`; iOS ignores the SVG data URI.
 
 ## Tests
 

@@ -34,7 +34,8 @@ design possible. There is no build step and no server component.
 
 | File | Owns |
 |------|------|
-| `index.html` | Markup, meta tags, CSP. |
+| `index.html` | Markup, meta tags, CSP, icon and manifest links. |
+| `icons/`, `manifest.webmanifest` | App icon (`icon.svg` is the source; the PNGs are renders of it at 32, 180, 192 and 512 px, full square because iOS and Android mask the corners) and the web app manifest for "Add to Home screen". |
 | `style.css` | Layouts, the portrait/landscape orientation query, night mode, setup form. |
 | `app.js` | DOM wiring: setup, refresh scheduling, wake lock, banners, graph, gestures. `CONFIG` at the top. |
 | `display.js` | Pure functions, no DOM: units, bands, trend arrows, reading normalisation, age/delta/stale summary, graph range, fetch timing. Put new logic here so it can be tested. |
@@ -127,5 +128,3 @@ the next ordinary push.
 ## Follow-ups
 
 - In-browser settings for thresholds, units and the night window.
-- A PNG `apple-touch-icon`; iOS ignores the SVG data URI and uses a
-  screenshot instead.
