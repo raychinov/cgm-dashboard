@@ -90,10 +90,24 @@ screen on. *Settings → Security → App pinning* stops stray touches.
 For a fully locked-down kiosk use
 [Fully Kiosk Browser](https://www.fully-kiosk.com/).
 
-**iPhone / iPad:** Safari → *Share → Add to Home Screen*. Then
-*Settings → Accessibility → Guided Access*: open the dashboard,
-triple-click the side button to start it, and set *Display Auto-Lock*
-to *Never* in its options.
+**iPhone / iPad:** install it as an app, don't just bookmark it.
+
+1. Open the page in **Safari** (only Safari can do this on iOS).
+2. Tap **Share** (the square with an arrow), then **Add to Home
+   Screen**, then **Add**.
+3. Open it from the new home-screen icon and enter the Dexcom login
+   **there**. The installed copy has its own storage, so a login done
+   in the Safari tab does not carry over.
+
+It then runs full screen without browser bars. This also matters for
+reliability: Safari wipes a website's saved data after seven days
+without interaction, which would log the kiosk out; home-screen apps
+are exempt.
+
+For an unattended kiosk, add *Settings → Accessibility → Guided
+Access*: turn it on, set *Display Auto-Lock* to *Never* in its
+options, then open the dashboard and triple-click the side button to
+lock the phone to it.
 
 **Battery:** a phone kept at 100% for months swells its battery. Put
 the charger on a smart plug with a short daily schedule, or cap
