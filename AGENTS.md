@@ -23,11 +23,15 @@ design possible. There is no build step and no server component.
    'self'`, `connect-src` limited to the three Dexcom hosts. No inline
    scripts, no inline `style=""` attributes. Adding a host to
    `dexcom-client.js` means adding it to `connect-src`.
-4. **Never retry authentication on an auth failure.** Dexcom locks the
-   account after repeated bad logins. Re-authenticate only on
-   `SessionIdNotFound` / `SessionNotValid`; a password or lockout error
-   stops the refresh loop and reopens setup. Classification lives on
-   `DexcomError`.
+4. **Send the password as rarely as possible.** Dexcom locks the
+   account after repeated bad logins. Sessions have no expiry of our
+   own; re-login only on `SessionIdNotFound` / `SessionNotValid`. A
+   password or lockout error stops the refresh loop and shows LOGGED
+   OUT with the credentials kept; a tap retries once, and only
+   `SSO_InternalError` retries by itself (hourly). Any other login
+   failure pauses logins for 5, then 15, then 60 minutes
+   (`cgm.loginPause`), as does a fresh session being rejected at once.
+   Classification lives on `DexcomError`.
 5. **Single user per deployment.**
 
 ## Where things live
@@ -39,7 +43,7 @@ design possible. There is no build step and no server component.
 | `style.css` | Layouts, the portrait/landscape orientation query, night mode, setup form. |
 | `app.js` | DOM wiring: setup, refresh scheduling, wake lock, banners, graph, gestures. `CONFIG` at the top. |
 | `display.js` | Pure functions, no DOM: units, bands, trend arrows, reading normalisation, age/delta/stale summary, graph range, fetch timing. Put new logic here so it can be tested. |
-| `dexcom-client.js` | Dexcom auth flow, 1 h session cache, account-id cache (`cgm.account`, keyed by username and region, so a session refresh is one call instead of two), error classification, retry-once on session errors. |
+| `dexcom-client.js` | Dexcom auth flow, session cache (`cgm.session`, kept until Dexcom rejects it), account-id cache (`cgm.account`, keyed by username and region, so a re-login is one call instead of two), login pause (`cgm.loginPause`), error classification, retry-once on session errors. |
 | `tests/*.test.ts` | vitest suites for `display.js` and `dexcom-client.js`; `setup.ts` stubs `localStorage`. |
 | `tests/e2e/` | Playwright: `dexcom.ts` intercepts the Dexcom hosts with fixtures; `dashboard.spec.ts` covers setup, errors, layouts, banners, reset, scheduling; `layout.spec.ts` checks every landscape phone/tablet viewport for overflow and against the snapshots in `__snapshots__/`; `screenshots.spec.ts` (only via `npm run screenshots`) renders the README images. Playwright answers CORS preflights itself, so the suite cannot detect Dexcom dropping CORS; that stays a manual curl. |
 
@@ -95,10 +99,22 @@ the next ordinary push.
   an allowlist of the three hosts and rejecting any `path` that is not
   a plain absolute path (SSRF guard).
 - **Fetch timing follows Dexcom's 5-minute cadence.** `nextFetchDelay`
-  waits until the next reading is due (plus `readingLagMs`), retries
+  waits until the next reading is due plus the learned lag, retries
   every `retryMs` while it is only slightly overdue, and drops to
-  `refreshMs` / `nightRefreshMs` when it is long overdue. Don't replace
-  it with a fixed interval; it is both fresher and cheaper.
+  `refreshMs` / `nightRefreshMs` when it is long overdue or after a
+  failed fetch. The lag (`cgm.lag`, `nextLagEstimate`) is how long
+  after its own timestamp a new reading first appeared, measured on the
+  phone's clock, so clock skew in either direction is absorbed. Don't
+  replace any of it with a fixed interval.
+- **No blocking overlay, no log-out gesture.** With stored credentials
+  the dashboard starts fetching at once; the first touch only requests
+  fullscreen and the wake lock (the "tap for fullscreen" chip). There
+  is deliberately no way to log out from the page; a dedicated screen
+  with confirmation is the only acceptable way to add one.
+- **Keep-awake has two layers.** The Screen Wake Lock sentinel is
+  re-requested on `release`; the fallback is a real 1 s black MP4
+  (`SILENT_MP4`, generated with ffmpeg). An MP4 without a media track
+  is rejected by Chrome, so don't shrink it.
 - **Per-region `applicationId`.** US and OUS share one GUID, Japan has
   its own. The wrong one returns `ApplicationNotAuthenticated`.
   Cross-check pydexcom's `const.py` if Dexcom rotates them.

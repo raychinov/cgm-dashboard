@@ -198,15 +198,21 @@ describe("getSession cache", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("re-authenticates after 1h and persists the new session", async () => {
-    cacheSession("old-session", 3_600_001);
+  it("keeps using a session however old it is until Dexcom rejects it", async () => {
+    cacheSession("old-session", 3 * 24 * 3_600_000);
+
+    await expect(client.getSession(creds)).resolves.toBe("old-session");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("logs in when there is no session and persists it", async () => {
     fetchMock.mockResolvedValueOnce(json("acct-2")).mockResolvedValueOnce(json("new-session"));
 
     await expect(client.getSession(creds)).resolves.toBe("new-session");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const stored = JSON.parse(localStorage.getItem("cgm.session")!);
-    expect(stored).toMatchObject({ id: "new-session", server: "ous" });
+    expect(stored).toMatchObject({ id: "new-session", server: "ous", username: "user@example.com" });
     expect(Date.now() - stored.createdAt).toBeLessThan(5_000);
   });
 
@@ -215,13 +221,6 @@ describe("getSession cache", () => {
 
     await expect(client.getSession(creds)).rejects.toMatchObject({ code: "InvalidCredentials" });
     expect(localStorage.getItem("cgm.session")).toBeNull();
-  });
-
-  it("ignores a session stamped in the future, as after a clock change", async () => {
-    cacheSession("future-session", -120_000);
-    fetchMock.mockResolvedValueOnce(json("acct-f")).mockResolvedValueOnce(json("fresh"));
-
-    await expect(client.getSession(creds)).resolves.toBe("fresh");
   });
 
   it("re-authenticates when the cached server differs", async () => {
@@ -310,7 +309,7 @@ describe("account id cache", () => {
     await client.getSession(creds);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    cacheSession("sess-1", 3_600_001);
+    localStorage.removeItem("cgm.session");
     fetchMock.mockResolvedValueOnce(json("sess-2"));
 
     await expect(client.getSession(creds)).resolves.toBe("sess-2");
@@ -359,6 +358,72 @@ describe("account id cache", () => {
     client.clearCreds();
 
     expect(localStorage.getItem("cgm.account")).toBeNull();
+  });
+});
+
+describe("login pause", () => {
+  const pause = () => JSON.parse(localStorage.getItem("cgm.loginPause") ?? "null");
+
+  it("pauses logins for 5 minutes after a server error on login, then 15, then 60", async () => {
+    for (const [attempt, minutes] of [[1, 5], [2, 15], [3, 60], [4, 60]] as const) {
+      localStorage.removeItem("cgm.session");
+      fetchMock.mockResolvedValueOnce(json("acct")).mockResolvedValueOnce(new Response("busy", { status: 503 }));
+      await expect(client.getSession(creds)).rejects.toMatchObject({ code: "HttpError" });
+      expect(pause().until - Date.now()).toBeGreaterThan(minutes * 60_000 - 1_000);
+      expect(pause().until - Date.now()).toBeLessThanOrEqual(minutes * 60_000);
+      localStorage.setItem("cgm.loginPause", JSON.stringify({ ...pause(), until: Date.now() - 1 }));
+      expect(fetchMock).toHaveBeenCalledTimes(attempt * 2);
+    }
+  });
+
+  it("refuses to log in while paused and says for how long", async () => {
+    localStorage.setItem("cgm.loginPause", JSON.stringify({ step: 0, until: Date.now() + 240_000 }));
+
+    const err = await client.getSession(creds).catch((e) => e);
+
+    expect(err.code).toBe("LoginPaused");
+    expect(err.isPaused).toBe(true);
+    expect(err.isAuthError).toBe(false);
+    expect(err.retryInMs).toBeGreaterThan(230_000);
+    expect(client.loginPausedMs()).toBeGreaterThan(230_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not pause after a password error or a network error", async () => {
+    fetchMock.mockResolvedValueOnce(dexcomFailure("AccountPasswordInvalid"));
+    await expect(client.getSession(creds)).rejects.toMatchObject({ code: "AccountPasswordInvalid" });
+    expect(pause()).toBeNull();
+
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(client.getSession(creds)).rejects.toThrow(TypeError);
+    expect(pause()).toBeNull();
+  });
+
+  it("clears the pause on a successful login and on clearCreds", async () => {
+    localStorage.setItem("cgm.loginPause", JSON.stringify({ step: 1, until: Date.now() - 1 }));
+    fetchMock.mockResolvedValueOnce(json("acct")).mockResolvedValueOnce(json("sess"));
+    await client.getSession(creds);
+    expect(pause()).toBeNull();
+
+    localStorage.setItem("cgm.loginPause", JSON.stringify({ step: 1, until: Date.now() + 60_000 }));
+    client.clearCreds();
+    expect(pause()).toBeNull();
+  });
+
+  it("pauses when a fresh session is rejected straight away, so a broken account cannot re-login every cycle", async () => {
+    cacheSession("stale");
+    fetchMock
+      .mockResolvedValueOnce(dexcomFailure("SessionNotValid"))
+      .mockResolvedValueOnce(json("acct"))
+      .mockResolvedValueOnce(json("fresh"))
+      .mockResolvedValueOnce(dexcomFailure("SessionNotValid"));
+
+    await expect(client.getReadings(readParams)).rejects.toMatchObject({ code: "SessionNotValid" });
+
+    expect(localStorage.getItem("cgm.session")).toBeNull();
+    expect(pause().step).toBe(0);
+    await expect(client.getReadings(readParams)).rejects.toMatchObject({ code: "LoginPaused" });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 

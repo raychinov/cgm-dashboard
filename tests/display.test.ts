@@ -6,6 +6,7 @@ import {
   formatGlucose,
   graphRange,
   nextFetchDelay,
+  nextLagEstimate,
   normalizeReadings,
   parseDexcomDate,
   summarize,
@@ -157,6 +158,24 @@ describe("nextFetchDelay", () => {
   it("falls back to the plain interval once the reading is long overdue", () => {
     expect(nextFetchDelay(at(now - 9 * MIN), now, timing)).toBe(60_000);
     expect(nextFetchDelay(at(now - 120 * MIN), now, { ...timing, fallbackMs: 120_000 })).toBe(120_000);
+  });
+});
+
+describe("nextLagEstimate", () => {
+  it("adopts the first observation, clamped to ten minutes either way", () => {
+    expect(nextLagEstimate(null, 12_000)).toBe(12_000);
+    expect(nextLagEstimate(undefined, -900_000)).toBe(-600_000);
+    expect(nextLagEstimate(NaN, 900_000)).toBe(600_000);
+  });
+
+  it("drops immediately when a reading shows up earlier than expected", () => {
+    expect(nextLagEstimate(60_000, 8_000)).toBe(8_000);
+    expect(nextLagEstimate(10_000, -120_000)).toBe(-120_000);
+  });
+
+  it("rises slowly when readings keep arriving later, so one slow fetch cannot push it out", () => {
+    expect(nextLagEstimate(10_000, 65_000)).toBe(15_000);
+    expect(nextLagEstimate(10_000, 12_000)).toBe(12_000);
   });
 });
 

@@ -69,9 +69,14 @@ Home Screen* (below) instead.
   | ![Full layout](docs/screenshots/full.png) | ![Compact layout](docs/screenshots/compact.png) | ![Focus layout](docs/screenshots/focus.png) |
   | Clock, reading, 3-hour graph | Clock and reading | Reading, change and age, as large as the screen allows |
 
-- **Double-tap the top-left corner** to forget the credentials and go
-  back to setup.
+- After a reboot or a browser restart, open the dashboard again and it
+  resumes by itself; tap once for fullscreen.
 - Between **22:00 and 07:00** the screen dims.
+- If Dexcom rejects the saved login (a changed password, a locked
+  account), the banner says **LOGGED OUT** with the reason, polling
+  stops so the account cannot be locked, and a tap retries once. To
+  change the credentials, clear the site's data in the phone's browser
+  settings and open the page again.
 - Dexcom publishes a reading every 5 minutes. The page asks for it the
   moment it is due and retries every 5 seconds for up to 3 minutes,
   then once a minute (every 2 minutes at night). A new reading
@@ -103,6 +108,8 @@ charging at 80% if the phone supports it.
 | *Could not reach Dexcom* | The phone is offline, or a network filter blocks `dexcom.com`. |
 | *Connected, but Dexcom returned no readings* | You used a follower's login. A follower account logs in fine but has no readings of its own; use the account signed in on the phone with the sensor. Otherwise sharing is off, has no follower, or that phone is offline. |
 | *NO DATA* after it worked | A temporary hiccup. It retries by itself. If it stays, check the Dexcom app. |
+| *NO DATA · logins paused N min* | Dexcom's login service answered with an error. The page waits before sending the password again (5, then 15, then 60 minutes). |
+| *LOGGED OUT · …* | Dexcom rejected the saved login. Polling has stopped. Tap to retry once; if the password changed, clear the site's data and set up again. |
 | *Dexcom error: …* | Dexcom answered with something unexpected. Try again in a minute; if it persists, open an issue with the code shown. |
 | *STALE (N min)* | Dexcom has not published a new reading. Usually the sensor phone lost its connection. |
 
@@ -114,8 +121,9 @@ other destination. Your Dexcom username and password are stored in
 plain text in the phone browser's local storage so the page can log in
 again after a reload. That means:
 
-- Anyone who can unlock the phone can use the dashboard. Double-tap
-  the corner to log out before handing it to someone else.
+- Anyone who can unlock the phone can use the dashboard. There is no
+  log-out button; clear the site's data in the browser settings before
+  handing the phone to someone else.
 - On GitHub Pages, local storage belongs to the whole `<account>.github.io`
   origin, so any other Pages site published under the same account
   could read it. This is the only Pages site on the author's account,

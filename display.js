@@ -70,6 +70,16 @@ export function summarize(readings, now, staleMinutes) {
   return { latest, ageMin, delta, stale: ageMin >= staleMinutes };
 }
 
+const LAG_MIN_MS = -600_000;
+const LAG_MAX_MS = 600_000;
+const LAG_RISE_MS = 5_000;
+
+export function nextLagEstimate(current, observed) {
+  const clamped = Math.min(LAG_MAX_MS, Math.max(LAG_MIN_MS, observed));
+  if (typeof current !== "number" || Number.isNaN(current)) return clamped;
+  return clamped < current ? clamped : Math.min(clamped, current + LAG_RISE_MS);
+}
+
 const MIN_FETCH_DELAY_MS = 5_000;
 
 export function nextFetchDelay(readings, now, { readingIntervalMs, readingLagMs, retryMs, overdueWindowMs, fallbackMs }) {

@@ -15,6 +15,7 @@ const READ_PATH = "/ShareWebServices/Services/Publisher/ReadPublisherLatestGluco
 const NIL_GUID = "00000000-0000-0000-0000-000000000000";
 const SESSION_CODES = new Set(["SessionIdNotFound", "SessionNotValid"]);
 const LOCKED_CODE = "SSO_AuthenticateMaxAttemptsExceeded";
+const PAUSED_CODE = "LoginPaused";
 const AUTH_CODES = new Set([
   "AccountPasswordInvalid",
   "SSO_AuthenticateAccountNotFound",
@@ -25,10 +26,12 @@ const AUTH_CODES = new Set([
 ]);
 const SSO_AUTH_MESSAGE = /Cannot Authenticate by Account(Name|Id)/;
 
-const SESSION_TTL_MS = 3_600_000;
 const CREDS_KEY = "cgm.creds";
 const SESSION_KEY = "cgm.session";
 const ACCOUNT_KEY = "cgm.account";
+const PAUSE_KEY = "cgm.loginPause";
+const PAUSE_STEPS_MS = [300_000, 900_000, 3_600_000];
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export class DexcomError extends Error {
   constructor(code, message, status = 0) {
@@ -48,6 +51,9 @@ export class DexcomError extends Error {
   get isLocked() {
     return this.code === LOCKED_CODE;
   }
+  get isPaused() {
+    return this.code === PAUSED_CODE;
+  }
 }
 
 function errorFromResponse(status, text) {
@@ -64,8 +70,6 @@ function regionValue(map, server) {
   if (!Object.prototype.hasOwnProperty.call(map, server)) throw new Error(`unknown server: ${server}`);
   return map[server];
 }
-
-const REQUEST_TIMEOUT_MS = 15_000;
 
 async function callDexcom(server, path, { body, query } = {}) {
   const url = new URL(path, regionValue(HOSTS, server));
@@ -130,6 +134,17 @@ export function invalidateSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+export function loginPausedMs() {
+  const pause = readJson(PAUSE_KEY);
+  return pause ? Math.max(0, pause.until - Date.now()) : 0;
+}
+
+function pauseLogins() {
+  const pause = readJson(PAUSE_KEY);
+  const step = Math.min(pause ? pause.step + 1 : 0, PAUSE_STEPS_MS.length - 1);
+  localStorage.setItem(PAUSE_KEY, JSON.stringify({ step, until: Date.now() + PAUSE_STEPS_MS[step] }));
+}
+
 function cachedAccountId(creds) {
   const account = readJson(ACCOUNT_KEY);
   return account && account.username === creds.username && account.server === creds.server ? account.accountId : null;
@@ -137,19 +152,29 @@ function cachedAccountId(creds) {
 
 export async function getSession(creds) {
   const cached = readJson(SESSION_KEY);
-  const age = cached ? Date.now() - cached.createdAt : -1;
-  if (cached && cached.username === creds.username && cached.server === creds.server && age >= 0 && age < SESSION_TTL_MS) {
-    return cached.id;
-  }
-  const knownAccountId = cachedAccountId(creds);
-  const accountId = knownAccountId ?? (await authenticate(creds));
-  let sessionId;
-  try {
-    sessionId = await loginById(accountId, creds);
-  } catch (err) {
-    if (knownAccountId && err instanceof DexcomError && err.isAuthError) localStorage.removeItem(ACCOUNT_KEY);
+  if (cached && cached.username === creds.username && cached.server === creds.server) return cached.id;
+  const paused = loginPausedMs();
+  if (paused > 0) {
+    const err = new DexcomError(PAUSED_CODE, `logins paused for ${Math.ceil(paused / 60_000)} min`);
+    err.retryInMs = paused;
     throw err;
   }
+  const knownAccountId = cachedAccountId(creds);
+  let accountId, sessionId;
+  try {
+    accountId = knownAccountId ?? (await authenticate(creds));
+    sessionId = await loginById(accountId, creds);
+  } catch (err) {
+    if (err instanceof DexcomError) {
+      if (err.isAuthError) {
+        if (knownAccountId) localStorage.removeItem(ACCOUNT_KEY);
+      } else {
+        pauseLogins();
+      }
+    }
+    throw err;
+  }
+  localStorage.removeItem(PAUSE_KEY);
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify({ username: creds.username, server: creds.server, accountId }));
   localStorage.setItem(SESSION_KEY, JSON.stringify({ id: sessionId, username: creds.username, server: creds.server, createdAt: Date.now() }));
   return sessionId;
@@ -163,7 +188,15 @@ export async function getReadings(creds) {
     if (!(err instanceof DexcomError && err.isSessionError)) throw err;
     invalidateSession();
   }
-  return readReadings(await getSession(creds), creds);
+  try {
+    return await readReadings(await getSession(creds), creds);
+  } catch (err) {
+    if (err instanceof DexcomError && err.isSessionError) {
+      invalidateSession();
+      pauseLogins();
+    }
+    throw err;
+  }
 }
 
 export function getCreds() {
@@ -178,4 +211,5 @@ export function clearCreds() {
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(ACCOUNT_KEY);
+  localStorage.removeItem(PAUSE_KEY);
 }

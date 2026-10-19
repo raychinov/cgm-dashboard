@@ -1,5 +1,19 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { APP_ID_US, BASE_TIME, RISING, connect, dexcomFailure, freezeClock, readings, stubDexcom, test } from "./dexcom";
+
+const WAKE_LOCK_MOCK = `
+  window.__wake = { requests: 0, release: null };
+  Object.defineProperty(navigator, "wakeLock", { value: { request: async () => {
+    window.__wake.requests++;
+    const listeners = [];
+    window.__wake.release = () => listeners.forEach((fn) => fn());
+    return { released: false, addEventListener: (type, fn) => listeners.push(fn), release: async () => {} };
+  } } });
+`;
+
+async function unlock(page: Page) {
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+}
 
 test.beforeEach(async ({ page }) => {
   await freezeClock(page);
@@ -17,6 +31,7 @@ test("setup flow: credentials go to the chosen Dexcom host and the dashboard sho
   await expect(page.locator("#glucose")).toHaveClass("color-urgent-high");
   await expect(page.locator("#trend")).toHaveText("↑");
   await expect(page.locator("#meta")).toHaveText("+2.5 · 2 min ago");
+  await expect(page.locator("#fullscreen-hint")).toBeHidden();
   expect(stub.calls).toEqual({ auth: 1, login: 1, read: 1 });
   expect(stub.requests.map((r) => r.host)).toEqual(["share2.dexcom.com", "share2.dexcom.com", "share2.dexcom.com"]);
   expect(stub.requests[0].body).toEqual({ accountName: "sharer@example.com", password: "pw", applicationId: APP_ID_US });
@@ -106,7 +121,7 @@ test("a failed refresh shows NO DATA, keeps the last reading, and waits the slow
   await expect(page.locator("#glucose")).toHaveText("16.9");
 
   stub.read = dexcomFailure("InvalidArgument");
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await unlock(page);
 
   await expect(page.locator("#banner")).toHaveClass("error");
   await expect(page.locator("#banner")).toHaveText("NO DATA");
@@ -120,7 +135,7 @@ test("a failed refresh shows NO DATA, keeps the last reading, and waits the slow
   await expect.poll(() => stub.calls.read).toBe(3);
 });
 
-test("a password change mid-run returns to setup and stops the loop", async ({ page }) => {
+test("a password change mid-run shows LOGGED OUT, keeps the credentials, stops polling, and a tap retries once", async ({ page }) => {
   const stub = await stubDexcom(page);
   await page.goto("/");
   await connect(page);
@@ -128,22 +143,33 @@ test("a password change mid-run returns to setup and stops the loop", async ({ p
 
   stub.read = dexcomFailure("SessionNotValid");
   stub.login = dexcomFailure("AccountPasswordInvalid");
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await unlock(page);
 
-  await expect(page.locator("#setup")).toBeVisible();
-  await expect(page.locator("#setup-error")).toContainText("Dexcom rejected the login");
-  await expect(page.locator("#setup-username")).toHaveValue("sharer@example.com");
-  await expect(page.locator("#banner")).toBeHidden();
-  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).toBeNull();
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+  await expect(page.locator("#banner")).toContainText("Dexcom rejected the login");
+  await expect(page.locator("#setup")).toBeHidden();
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).not.toBeNull();
   expect(await page.evaluate(() => localStorage.getItem("cgm.account"))).toBeNull();
   expect(stub.calls).toEqual({ auth: 1, login: 2, read: 2 });
 
   await page.clock.runFor(10 * 60_000);
   await page.waitForTimeout(150);
   expect(stub.calls).toEqual({ auth: 1, login: 2, read: 2 });
+
+  await page.mouse.click(400, 200);
+  await expect.poll(() => stub.calls.login).toBe(3);
+  expect(stub.calls.auth).toBe(2);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+
+  stub.login = () => ({ status: 200, body: "22222222-2222-2222-2222-222222222222" });
+  stub.read = () => ({ status: 200, body: readings(RISING) });
+  await page.mouse.click(400, 200);
+  await expect(page.locator("#banner")).toBeHidden();
+  await expect.poll(() => stub.calls.read).toBe(3);
 });
 
-test("a lockout mid-run returns to setup and stops the loop", async ({ page }) => {
+test("a lockout mid-run shows LOGGED OUT and stops polling", async ({ page }) => {
   const stub = await stubDexcom(page);
   await page.goto("/");
   await connect(page);
@@ -151,15 +177,36 @@ test("a lockout mid-run returns to setup and stops the loop", async ({ page }) =
 
   stub.read = dexcomFailure("SessionNotValid");
   stub.login = dexcomFailure("SSO_AuthenticateMaxAttemptsExceeded");
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await unlock(page);
 
-  await expect(page.locator("#setup-error")).toContainText("locked the account");
+  await expect(page.locator("#banner")).toContainText("account locked");
   await page.clock.runFor(10 * 60_000);
   await page.waitForTimeout(150);
   expect(stub.calls).toEqual({ auth: 1, login: 2, read: 2 });
 });
 
-test("a server error during a session refresh keeps the account id and waits", async ({ page }) => {
+test("an SSO_InternalError logout retries by itself after an hour", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+
+  stub.read = dexcomFailure("SessionNotValid");
+  stub.login = () => ({ status: 500, body: { Code: "SSO_InternalError", Message: "Cannot Authenticate by AccountId" } });
+  await unlock(page);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+  expect(stub.calls).toEqual({ auth: 1, login: 2, read: 2 });
+
+  await page.clock.runFor(60 * 60_000 - 1_000);
+  await page.waitForTimeout(300);
+  expect(stub.calls.login).toBe(2);
+  await page.clock.runFor(2_000);
+  await expect.poll(() => stub.calls.login).toBe(3);
+  expect(stub.calls.auth).toBe(2);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+});
+
+test("a server error during a session refresh keeps the account id and pauses logins for 5 minutes", async ({ page }) => {
   const stub = await stubDexcom(page);
   await page.goto("/");
   await connect(page);
@@ -167,33 +214,23 @@ test("a server error during a session refresh keeps the account id and waits", a
 
   stub.read = dexcomFailure("SessionNotValid");
   stub.login = () => ({ status: 503, body: "<html>unavailable</html>" });
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await unlock(page);
 
   await expect(page.locator("#banner")).toHaveText("NO DATA");
   await expect(page.locator("#setup")).toBeHidden();
   expect(await page.evaluate(() => localStorage.getItem("cgm.account"))).not.toBeNull();
-  await page.waitForTimeout(150);
-  await page.clock.runFor(55_000);
-  await page.waitForTimeout(150);
   expect(stub.calls).toEqual({ auth: 1, login: 2, read: 2 });
+
+  await page.waitForTimeout(150);
+  await page.clock.runFor(4 * 60_000);
+  await page.waitForTimeout(150);
+  expect(stub.calls.login).toBe(2);
+  await expect(page.locator("#banner")).toContainText("logins paused");
+  await page.clock.runFor(2 * 60_000);
+  await expect.poll(() => stub.calls.login).toBe(3);
 });
 
-test("double-tapping the corner forgets the credentials but keeps the username", async ({ page }) => {
-  await stubDexcom(page);
-  await page.goto("/");
-  await connect(page);
-  await expect(page.locator("#setup")).toBeHidden();
-
-  await page.locator("#reset-zone").dblclick();
-
-  await expect(page.locator("#setup")).toBeVisible();
-  await expect(page.locator("#setup-username")).toHaveValue("sharer@example.com");
-  await expect(page.locator("#setup-password")).toBeFocused();
-  await expect(page.locator("#glucose")).toHaveText("---");
-  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).toBeNull();
-});
-
-test("the next fetch waits for the reading that is due, then retries every 5 s", async ({ page }) => {
+test("the next fetch waits for the reading that is due, retries every 5 s, and learns the lag", async ({ page }) => {
   const stub = await stubDexcom(page);
   await page.goto("/");
   await connect(page);
@@ -203,7 +240,7 @@ test("the next fetch waits for the reading that is due, then retries every 5 s",
     await page.waitForTimeout(150);
   };
 
-  await page.clock.runFor(179_000);
+  await page.clock.runFor(189_000);
   await page.waitForTimeout(100);
   expect(stub.calls.read).toBe(1);
   await page.clock.runFor(2_000);
@@ -217,6 +254,7 @@ test("the next fetch waits for the reading that is due, then retries every 5 s",
   stub.read = () => ({ status: 200, body: readings(RISING, BASE_TIME + 300_000) });
   await page.clock.runFor(5_000);
   await expectReads(5);
+  expect(await page.evaluate(() => localStorage.getItem("cgm.lag"))).toBe("15000");
   await page.clock.runFor(60_000);
   await page.waitForTimeout(200);
   expect(stub.calls.read).toBe(5);
@@ -248,18 +286,41 @@ test("night mode dims the page after 22:00", async ({ page }) => {
   await expect(page.locator("body")).toHaveClass(/night-mode/);
 });
 
-test("stored credentials fetch immediately and show the tap-to-start gate on touch devices", async ({ browser }) => {
+test("stored credentials fetch at once, show a fullscreen hint on touch devices, and keep the screen awake", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 956, height: 440 } });
+  const page = await context.newPage();
+  await freezeClock(page);
+  await stubDexcom(page);
+  await page.addInitScript(WAKE_LOCK_MOCK);
+  await page.addInitScript(() => localStorage.setItem("cgm.creds", JSON.stringify({ username: "u", password: "p", server: "ous" })));
+  await page.goto("/");
+
+  await expect(page.locator("#setup")).toBeHidden();
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await expect(page.locator("#fullscreen-hint")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__wake.requests)).toBe(1);
+  await expect.poll(() => page.evaluate(() => (document.getElementById("nosleep") as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(2);
+
+  await page.touchscreen.tap(400, 200);
+  await expect(page.locator("#fullscreen-hint")).toBeHidden();
+
+  await page.evaluate(() => (window as any).__wake.release());
+  await page.clock.runFor(1_500);
+  await expect.poll(() => page.evaluate(() => (window as any).__wake.requests)).toBe(2);
+  await context.close();
+});
+
+test("the fullscreen hint goes away by itself after 30 s", async ({ browser }) => {
   const context = await browser.newContext({ hasTouch: true, viewport: { width: 956, height: 440 } });
   const page = await context.newPage();
   await freezeClock(page);
   await stubDexcom(page);
   await page.addInitScript(() => localStorage.setItem("cgm.creds", JSON.stringify({ username: "u", password: "p", server: "ous" })));
   await page.goto("/");
+  await expect(page.locator("#fullscreen-hint")).toBeVisible();
 
-  await expect(page.locator("#setup")).toBeHidden();
-  await expect(page.locator("#overlay")).toBeVisible();
-  await expect(page.locator("#glucose")).toHaveText("16.9");
-  await page.locator("#overlay").tap();
-  await expect(page.locator("#overlay")).toBeHidden();
+  await page.clock.runFor(31_000);
+
+  await expect(page.locator("#fullscreen-hint")).toBeHidden();
   await context.close();
 });
