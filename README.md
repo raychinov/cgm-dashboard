@@ -161,8 +161,14 @@ npm test                 # unit tests
 npm run test:e2e         # browser tests with stubbed Dexcom, same Docker image as CI
 npm run test:e2e:chrome  # the same tests in the installed Google Chrome, no snapshots
 npm run typecheck
-npm run dev              # http://localhost:8787
+npm run dev              # http://localhost:8787, also on the LAN for a phone
 ```
+
+To try a change on a phone before it is deployed, run `npm run dev`,
+open the `Network:` address it prints on a phone on the same Wi-Fi,
+and log out from Settings when you are done. Over plain HTTP the
+browser offers no wake lock, so only the video fallback keeps the
+screen on; everything else behaves as on GitHub Pages.
 
 Units and glucose thresholds are set on the Settings view and stored in
 the browser (`cgm.settings`, thresholds in mg/dL). Their defaults

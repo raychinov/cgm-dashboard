@@ -59,6 +59,18 @@ npm run typecheck
 npm run dev              # static server on :8787; hits real Dexcom from the browser
 ```
 
+**Try a branch on a phone without deploying.** `npm run dev` binds
+every interface and prints a `Network:` URL; open it on a phone on the
+same Wi-Fi. The phone talks to Dexcom directly as in production. Two
+differences: the page is plain HTTP, so the Screen Wake Lock API is
+absent and only the video fallback keeps the screen on, and the phone
+stores a copy of the credentials for that origin, so log out from
+Settings afterwards. On Android, `chrome://inspect` → port forwarding
+of 8787 lets the phone open `http://localhost:8787/`, which counts as a
+secure origin and also gives remote DevTools. Don't publish a second
+GitHub Pages site for this: it would share the `<account>.github.io`
+origin and could read the dashboard's stored credentials.
+
 No mock mode in production code. The Playwright suite intercepts the
 Dexcom hosts with `page.route` and serves fixtures from
 `tests/e2e/dexcom.ts`; to work on the UI without an account, run
