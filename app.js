@@ -1,5 +1,5 @@
 import { DexcomError, getReadings, getCreds, setCreds, clearCreds, invalidateSession } from "./dexcom-client.js";
-import { bandFor, colorHex, formatDelta, formatGlucose, graphRange, nextFetchDelay, nextLagEstimate, normalizeReadings, summarize, trendArrow } from "./display.js";
+import { bandFor, colorHex, formatDelta, formatGlucose, fromDisplayUnit, graphRange, nextFetchDelay, nextLagEstimate, normalizeReadings, parseSettings, summarize, toDisplayUnit, trendArrow, validThresholds } from "./display.js";
 
 const CONFIG = {
   units: "mmol",
@@ -12,6 +12,8 @@ const CONFIG = {
   nightRefreshMs: 120_000,
   loggedOutRetryMs: 3_600_000,
   hintMs: 30_000,
+  logoutConfirmMs: 5_000,
+  logoutMinGapMs: 600,
   nightStartHour: 22,
   nightEndHour: 7,
   staleMinutes: 15,
@@ -21,6 +23,9 @@ const CONFIG = {
 };
 const LAG_KEY = "cgm.lag";
 const SEEN_KEY = "cgm.seen";
+const SETTINGS_KEY = "cgm.settings";
+const REGION_NAMES = { us: "US", ous: "OUS", jp: "JP" };
+const UNIT_NAMES = { mmol: "mmol/L", mgdl: "mg/dL" };
 
 const $ = (id) => document.getElementById(id);
 const $glucose = $("glucose"), $trend = $("trend"), $meta = $("meta"), $banner = $("banner");
@@ -29,8 +34,12 @@ const $form = $("setup-form"), $u = $("setup-username"), $p = $("setup-password"
 const $server = $("setup-server"), $save = $("setup-save"), $err = $("setup-error");
 const $clockTime = $("clock-time"), $clockDate = $("clock-date");
 const $clock = $("clock"), $readingArea = $("reading-area"), $glucoseRow = $("glucose-row");
+const $settingsForm = $("settings-form"), $account = $("settings-account"), $unitLabel = $("settings-unit-label");
+const $settingsErr = $("settings-error"), $logout = $("settings-logout");
+const $unitRadios = $settingsForm.querySelectorAll("input[name=units]"), $thresholdInputs = $settingsForm.querySelectorAll("input[data-key]");
 
 let readings = [];
+let settings = parseSettings(localStorage.getItem(SETTINGS_KEY), CONFIG);
 let seen = loadSeen();
 let seenThisSession = false;
 let lagMs = loadLag();
@@ -41,6 +50,8 @@ let run = 0;
 let loggedOut = false;
 let loggedOutTimer = null;
 let hintTimer = null;
+let logoutTimer = null;
+let logoutArmedAt = 0;
 
 function loadLag() {
   const stored = Number(localStorage.getItem(LAG_KEY));
@@ -73,8 +84,8 @@ function seenAtForLatest() {
   return readings.length && seen && seen.ts === readings[readings.length - 1].ts ? seen.at : NaN;
 }
 
-function showSetupError(msg) { $err.textContent = msg; $err.style.display = "block"; }
-function hideSetupError() { $err.style.display = "none"; }
+function showSetupError(msg) { $err.textContent = msg; $err.classList.add("shown"); }
+function hideSetupError() { $err.classList.remove("shown"); }
 
 function describeFailure(err) {
   if (err instanceof DexcomError) {
@@ -111,7 +122,8 @@ function showHint() {
 }
 function hideHint() { clearTimeout(hintTimer); $hint.classList.add("hidden"); }
 
-function onGesture() {
+function onGesture(e) {
+  if (e.target instanceof Element && e.target.closest("#settings, #setup")) return;
   if (!running && !loggedOut) return;
   if (loggedOut) { retryLogin(); return; }
   enterFullscreen();
@@ -119,7 +131,6 @@ function onGesture() {
   hideHint();
 }
 document.addEventListener("click", onGesture);
-document.addEventListener("touchend", onGesture, { passive: true });
 
 async function submitCreds(e) {
   e.preventDefault();
@@ -241,7 +252,7 @@ function renderBanner(summary) {
 function renderMeta() {
   const summary = summarize(readings, Date.now(), CONFIG.staleMinutes, seenAtForLatest());
   if (summary) {
-    const deltaStr = summary.delta === null ? "" : formatDelta(summary.delta, CONFIG.units) + " · ";
+    const deltaStr = summary.delta === null ? "" : formatDelta(summary.delta, settings.units) + " · ";
     $meta.textContent = deltaStr + summary.ageMin + " min ago";
   } else {
     $meta.textContent = "No readings";
@@ -257,16 +268,21 @@ function updateDisplay() {
     $glucose.className = "";
     $trend.textContent = "";
     $trend.className = "";
+    clearGraph();
     renderMeta();
     return;
   }
   const latest = readings[readings.length - 1];
-  const band = "color-" + bandFor(latest.mgdl, CONFIG.thresholds);
-  $glucose.textContent = formatGlucose(latest.mgdl, CONFIG.units);
+  const band = "color-" + bandFor(latest.mgdl, settings.thresholds);
+  $glucose.textContent = formatGlucose(latest.mgdl, settings.units);
   $glucose.className = band;
   $trend.textContent = trendArrow(latest.trend);
   $trend.className = band;
   renderMeta();
+}
+
+function clearGraph() {
+  $canvas.getContext("2d").clearRect(0, 0, $canvas.width, $canvas.height);
 }
 
 function drawGraph() {
@@ -280,10 +296,10 @@ function drawGraph() {
   const pad = { top: 8, right: 8, bottom: 4, left: 36 }, gw = w - pad.left - pad.right, gh = h - pad.top - pad.bottom;
   const now = Date.now(), xStart = now - CONFIG.graphHours * 3_600_000;
   const visible = readings.filter((r) => r.ts >= xStart);
-  const { yMin, yMax } = graphRange(visible, CONFIG.thresholds);
+  const { yMin, yMax } = graphRange(visible, settings.thresholds);
   const yPos = (mgdl) => pad.top + gh * (1 - (mgdl - yMin) / (yMax - yMin));
   const xPos = (ts) => pad.left + gw * ((ts - xStart) / (now - xStart));
-  const t = CONFIG.thresholds;
+  const t = settings.thresholds;
   const band = (from, to, fill) => { ctx.fillStyle = fill; ctx.fillRect(pad.left, yPos(to), gw, yPos(from) - yPos(to)); };
   band(yMin, t.urgentLow, "rgba(139,0,0,0.08)");
   band(t.urgentLow, t.low, "rgba(139,128,0,0.06)");
@@ -308,13 +324,13 @@ function drawGraph() {
     ctx.arc(xPos(r.ts), yPos(r.mgdl), 3.5, 0, Math.PI * 2);
     ctx.fill();
   }
-  const ticks = CONFIG.units === "mmol" ? [3, 6, 9, 12] : [54, 108, 162, 216];
+  const ticks = settings.units === "mmol" ? [3, 6, 9, 12] : [54, 108, 162, 216];
   ctx.font = "11px -apple-system,sans-serif";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#777";
   for (const val of ticks) {
-    const mgdl = CONFIG.units === "mmol" ? val * 18 : val;
+    const mgdl = settings.units === "mmol" ? val * 18 : val;
     if (mgdl < yMin || mgdl > yMax) continue;
     ctx.fillText(String(val), pad.left - 4, yPos(mgdl));
   }
@@ -326,9 +342,16 @@ function clearError() { if ($banner.className === "error") { errorText = ""; $ba
 const SILENT_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMqbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2Mi4xMS4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMAEDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAABPgAAAAAAAAABhzdHRzAAAAAAAAAAEAAAACAAAgAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACcgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWgAAAGF1ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjIuMy4xMDAAAAAIZnJlZQAAAoRtZGF0AAACXwYF//9b3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTIga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9MiByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAALZYiEBTyYoAA/v4AAAAAGQZo4CXqA";
 
 let wakeLock = null;
+function releaseWakeLock() {
+  if (wakeLock) wakeLock.release().catch(() => {});
+  wakeLock = null;
+  $nosleep.pause();
+}
+
 function requestWakeLock() {
   if (!navigator.wakeLock || wakeLock || document.visibilityState !== "visible") return;
   navigator.wakeLock.request("screen").then((lock) => {
+    if (!running) { lock.release().catch(() => {}); return; }
     wakeLock = lock;
     lock.addEventListener("release", () => {
       wakeLock = null;
@@ -355,11 +378,13 @@ let inflight = null;
 function refresh() {
   if (inflight) return inflight;
   clearTimeout(refreshTimer);
-  inflight = fetchReadings().then((ok) => {
-    inflight = null;
-    if (running) scheduleNextFetch(!ok);
+  const thisRun = run;
+  const fetching = fetchReadings().then((ok) => {
+    if (inflight === fetching) inflight = null;
+    if (running && thisRun === run) scheduleNextFetch(!ok);
   });
-  return inflight;
+  inflight = fetching;
+  return fetching;
 }
 function scheduleNextFetch(afterFailure = false) {
   clearTimeout(refreshTimer);
@@ -374,7 +399,7 @@ function startApp(fetchNow = false) {
   showHint();
   if (readings.length && !fetchNow) scheduleNextFetch(); else refresh();
 }
-function stopApp() { run++; running = false; clearTimeout(refreshTimer); }
+function stopApp() { run++; running = false; inflight = null; clearTimeout(refreshTimer); }
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible" || !running) return;
@@ -401,24 +426,106 @@ tick();
 setInterval(tick, 10_000);
 window.addEventListener("resize", () => { fitText(); drawGraph(); });
 
-const LAYOUTS = ["", "layout-compact", "layout-focus"];
+const LAYOUTS = ["", "layout-compact", "layout-focus", "layout-settings"];
 let currentLayout = 0, touchStartX = 0, touchStartY = 0;
 function setLayout(i) {
   currentLayout = ((i % LAYOUTS.length) + LAYOUTS.length) % LAYOUTS.length;
-  document.body.classList.remove("layout-focus", "layout-compact");
+  document.body.classList.remove(...LAYOUTS.filter(Boolean));
   if (LAYOUTS[currentLayout]) document.body.classList.add(LAYOUTS[currentLayout]);
+  if (LAYOUTS[currentLayout] === "layout-settings") renderSettings(); else disarmLogout();
   requestAnimationFrame(() => { fitText(); if (currentLayout === 0 && readings.length) drawGraph(); });
 }
 document.addEventListener("touchstart", (e) => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }, { passive: true });
 document.addEventListener("touchend", (e) => {
   const dx = e.changedTouches[0].clientX - touchStartX, dy = e.changedTouches[0].clientY - touchStartY;
-  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) setLayout(currentLayout + (dx < 0 ? 1 : -1));
+  const swipe = Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5;
+  if (!swipe) { onGesture(e); return; }
+  if (!$setup.classList.contains("hidden")) return;
+  setLayout(currentLayout + (dx < 0 ? 1 : -1));
 }, { passive: true });
 document.addEventListener("keydown", (e) => {
   if (!$setup.classList.contains("hidden")) return;
+  if (e.target instanceof HTMLElement && e.target.matches("input, select, button, textarea")) return;
   if (e.key === "ArrowLeft") setLayout(currentLayout - 1);
   else if (e.key === "ArrowRight") setLayout(currentLayout + 1);
 });
+
+function showSettingsError(msg) { $settingsErr.textContent = msg; $settingsErr.classList.add("shown"); }
+function hideSettingsError() { $settingsErr.classList.remove("shown"); }
+
+function renderSettings() {
+  const creds = getCreds();
+  $account.textContent = creds ? `Signed in as ${creds.username} · ${REGION_NAMES[creds.server] ?? creds.server}` : "Not signed in";
+  for (const radio of $unitRadios) radio.checked = radio.value === settings.units;
+  $unitLabel.textContent = UNIT_NAMES[settings.units];
+  for (const input of $thresholdInputs) input.value = String(toDisplayUnit(settings.thresholds[input.dataset.key], settings.units));
+  hideSettingsError();
+}
+
+function saveSettings(next) {
+  settings = next;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  updateDisplay();
+  renderSettings();
+}
+
+function onThresholdChange(input) {
+  const thresholds = { ...settings.thresholds, [input.dataset.key]: fromDisplayUnit(input.value, settings.units) };
+  if (!validThresholds(thresholds)) {
+    showSettingsError("Enter a number. Thresholds must increase from urgent low to urgent high, between 40 and 400 mg/dL (2.2 and 22.2 mmol/L).");
+    return;
+  }
+  saveSettings({ ...settings, thresholds });
+}
+
+$settingsForm.addEventListener("change", (e) => {
+  if (e.target.name === "units") saveSettings({ ...settings, units: e.target.value });
+  else if (e.target.dataset.key) onThresholdChange(e.target);
+});
+$settingsForm.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || !(e.target instanceof HTMLInputElement)) return;
+  e.preventDefault();
+  e.target.blur();
+});
+
+function disarmLogout() {
+  clearTimeout(logoutTimer);
+  logoutArmedAt = 0;
+  $logout.classList.remove("armed");
+  $logout.textContent = "Log out";
+}
+
+function logOut() {
+  const sinceArmed = Date.now() - logoutArmedAt;
+  if (!logoutArmedAt || sinceArmed >= CONFIG.logoutConfirmMs) {
+    logoutArmedAt = Date.now();
+    $logout.classList.add("armed");
+    $logout.textContent = "Tap again to log out";
+    logoutTimer = setTimeout(disarmLogout, CONFIG.logoutConfirmMs);
+    return;
+  }
+  if (sinceArmed < CONFIG.logoutMinGapMs) return;
+  disarmLogout();
+  stopApp();
+  clearTimeout(loggedOutTimer);
+  loggedOut = false;
+  hideHint();
+  releaseWakeLock();
+  clearCreds();
+  localStorage.removeItem(SEEN_KEY);
+  localStorage.removeItem(LAG_KEY);
+  lagMs = CONFIG.readingLagMs;
+  readings = [];
+  seen = null;
+  seenThisSession = false;
+  clearError();
+  updateDisplay();
+  setLayout(0);
+  $form.reset();
+  hideSetupError();
+  $setup.classList.remove("hidden");
+}
+$logout.addEventListener("click", logOut);
 
 if (getCreds()) {
   $setup.classList.add("hidden");

@@ -76,7 +76,7 @@ test("a follower login gets the sharer-account hint", async ({ page }) => {
   await expect(page.locator("#setup")).toBeVisible();
 });
 
-test("arrow keys and swipes cycle the three layouts", async ({ page }) => {
+test("arrow keys and swipes cycle the four views", async ({ page }) => {
   await stubDexcom(page);
   await page.goto("/");
   await page.keyboard.press("ArrowRight");
@@ -92,17 +92,27 @@ test("arrow keys and swipes cycle the three layouts", async ({ page }) => {
   await expect(body).toHaveClass(/layout-focus/);
   await expect(page.locator("#clock")).toBeHidden();
   await page.keyboard.press("ArrowRight");
+  await expect(body).toHaveClass(/layout-settings/);
+  await expect(page.locator("#settings")).toBeVisible();
+  await expect(page.locator("#top-bar")).toBeHidden();
+  await expect(page.locator("#graph-area")).toBeHidden();
+  await page.keyboard.press("ArrowRight");
   await expect(body).not.toHaveClass(/layout-/);
+  await expect(page.locator("#settings")).toBeHidden();
   await expect(page.locator("#graph-area")).toBeVisible();
 
-  await page.evaluate(() => {
-    const touch = (type: string, x: number) =>
-      document.dispatchEvent(new TouchEvent(type, { [type === "touchstart" ? "touches" : "changedTouches"]: [new Touch({ identifier: 1, target: document.body, clientX: x, clientY: 300 })] }));
-    touch("touchstart", 300);
-    touch("touchend", 100);
-  });
+  await swipe(page, 300, 100);
   await expect(body).toHaveClass(/layout-compact/);
 });
+
+async function swipe(page: Page, fromX: number, toX: number) {
+  await page.evaluate(([fromX, toX]) => {
+    const touch = (type: string, x: number) =>
+      document.dispatchEvent(new TouchEvent(type, { [type === "touchstart" ? "touches" : "changedTouches"]: [new Touch({ identifier: 1, target: document.body, clientX: x, clientY: 300 })] }));
+    touch("touchstart", fromX);
+    touch("touchend", toX);
+  }, [fromX, toX]);
+}
 
 test("stale readings raise the STALE banner", async ({ page }) => {
   await stubDexcom(page, { read: () => ({ status: 200, body: readings([[20, 110, 4], [25, 112, 4]]) }) });
@@ -155,8 +165,10 @@ test("NO DATA names the age of the last reading once it is stale", async ({ page
   await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(119, 119, 119)");
 
   stub.read = () => ({ status: 200, body: readings(RISING, BASE_TIME + 16 * 60_000) });
-  await unlock(page);
-  await expect(page.locator("#banner")).toBeHidden();
+  await expect(async () => {
+    await unlock(page);
+    await expect(page.locator("#banner")).toBeHidden({ timeout: 500 });
+  }).toPass();
   await expect(page.locator("#glucose")).toHaveCSS("color", "rgb(139, 0, 0)");
 });
 
@@ -381,4 +393,258 @@ test("the fullscreen hint goes away by itself after 30 s", async ({ browser }) =
 
   await expect(page.locator("#fullscreen-hint")).toBeHidden();
   await context.close();
+});
+
+async function openSettings(page: Page) {
+  await expect(page.locator("#setup")).toBeHidden();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator("body")).toHaveClass(/layout-settings/);
+}
+
+async function typeThreshold(page: Page, id: string, value: string) {
+  const input = page.locator(`#${id}`);
+  await input.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type(value);
+  await page.keyboard.press("Enter");
+  await expect(input).not.toBeFocused();
+}
+
+async function closeSettings(page: Page) {
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("body")).not.toHaveClass(/layout-/);
+}
+
+test("settings show the account and the current values in the display unit", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+
+  await openSettings(page);
+
+  await expect(page.locator("#settings-account")).toHaveText("Signed in as sharer@example.com · OUS");
+  await expect(page.locator("input[name=units][value=mmol]")).toBeChecked();
+  await expect(page.locator("#settings-unit-label")).toHaveText("mmol/L");
+  await expect(page.locator("#threshold-urgentLow")).toHaveValue("3.9");
+  await expect(page.locator("#threshold-low")).toHaveValue("4.5");
+  await expect(page.locator("#threshold-high")).toHaveValue("9");
+  await expect(page.locator("#threshold-urgentHigh")).toHaveValue("10");
+  expect(await page.evaluate(() => localStorage.getItem("cgm.settings"))).toBeNull();
+});
+
+test("switching units re-renders the reading and survives a reload", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await openSettings(page);
+
+  await page.click("#settings-units label:has(input[value=mgdl])");
+
+  await expect(page.locator("#settings-unit-label")).toHaveText("mg/dL");
+  await expect(page.locator("#threshold-urgentLow")).toHaveValue("70");
+  await expect(page.locator("#threshold-urgentHigh")).toHaveValue("180");
+  await closeSettings(page);
+  await expect(page.locator("#glucose")).toHaveText("305");
+  await expect(page.locator("#meta")).toHaveText("+45 · 2 min ago");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!))).toEqual({
+    units: "mgdl",
+    thresholds: { urgentLow: 70, low: 81, high: 162, urgentHigh: 180 },
+  });
+
+  await page.reload();
+  await expect(page.locator("#glucose")).toHaveText("305");
+});
+
+test("a threshold change recolours the reading at once; an out-of-order value is refused", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveClass("color-urgent-high");
+  await openSettings(page);
+
+  await typeThreshold(page, "threshold-urgentHigh", "20");
+
+  await expect(page.locator("#threshold-urgentHigh")).toHaveValue("20");
+  await expect(page.locator("#settings-error")).toBeHidden();
+  await expect(page.locator("#glucose")).toHaveClass("color-high");
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!))).thresholds.urgentHigh).toBe(360);
+
+  await typeThreshold(page, "threshold-low", "19.5");
+
+  await expect(page.locator("#settings-error")).toBeVisible();
+  await expect(page.locator("#settings-error")).toContainText("must increase");
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!))).thresholds.low).toBe(81);
+
+  await typeThreshold(page, "threshold-low", "4,6");
+  await expect(page.locator("#settings-error")).toBeHidden();
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!))).thresholds.low).toBe(83);
+  await expect(page.locator("#threshold-low")).toHaveValue("4.6");
+
+  await page.reload();
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await expect(page.locator("#glucose")).toHaveClass("color-high");
+});
+
+test("editing one threshold in mmol/L leaves the other three exactly as stored", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await openSettings(page);
+  await page.click("#settings-units label:has(input[value=mgdl])");
+  await typeThreshold(page, "threshold-high", "170");
+  await page.click("#settings-units label:has(input[value=mmol])");
+  await expect(page.locator("#threshold-high")).toHaveValue("9.4");
+
+  await typeThreshold(page, "threshold-urgentHigh", "11");
+
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!))).thresholds).toEqual({ urgentLow: 70, low: 81, high: 170, urgentHigh: 198 });
+});
+
+test("arrow keys inside a settings field edit the field instead of switching views", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await openSettings(page);
+
+  await page.focus("#threshold-high");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowLeft");
+
+  await expect(page.locator("body")).toHaveClass(/layout-settings/);
+});
+
+test("log out needs two taps, forgets the credentials, stops polling and keeps the settings", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  await openSettings(page);
+  await page.click("#settings-units label:has(input[value=mgdl])");
+  const logout = page.locator("#settings-logout");
+
+  await logout.click();
+  await expect(logout).toHaveText("Tap again to log out");
+  await expect(page.locator("#setup")).toBeHidden();
+  await page.clock.runFor(6_000);
+  await expect(logout).toHaveText("Log out");
+  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).not.toBeNull();
+
+  await logout.click();
+  await logout.click();
+  await expect(logout).toHaveText("Tap again to log out");
+  await expect(page.locator("#setup")).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).not.toBeNull();
+
+  await page.clock.runFor(1_000);
+  await logout.click();
+
+  await expect(page.locator("#setup")).toBeVisible();
+  await expect(page.locator("body")).not.toHaveClass(/layout-/);
+  await expect(page.locator("#setup-username")).toHaveValue("");
+  await expect(page.locator("#glucose")).toHaveText("---");
+  expect(await page.evaluate(() => localStorage.getItem("cgm.creds"))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("cgm.session"))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("cgm.account"))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("cgm.seen"))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("cgm.lag"))).toBeNull();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cgm.settings")!).units)).toBe("mgdl");
+  const reads = stub.calls.read;
+  await page.clock.runFor(10 * 60_000);
+  await page.waitForTimeout(150);
+  expect(stub.calls.read).toBe(reads);
+
+  await swipe(page, 300, 100);
+  await connect(page, { username: "other@example.com", server: "us" });
+  await expect(page.locator("#setup")).toBeHidden();
+  await expect(page.locator("body")).not.toHaveClass(/layout-/);
+  await expect(page.locator("#glucose")).toHaveText("305");
+  expect(stub.requests.at(-3)!.body).toMatchObject({ accountName: "other@example.com" });
+});
+
+test("leaving the settings view disarms the log-out button", async ({ page }) => {
+  await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await openSettings(page);
+  await page.click("#settings-logout");
+  await expect(page.locator("#settings-logout")).toHaveText("Tap again to log out");
+
+  await closeSettings(page);
+  await openSettings(page);
+
+  await expect(page.locator("#settings-logout")).toHaveText("Log out");
+});
+
+test("log out from the LOGGED OUT state cancels the hourly retry", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  stub.read = dexcomFailure("SessionNotValid");
+  stub.login = () => ({ status: 500, body: { Code: "SSO_InternalError", Message: "Cannot Authenticate by AccountId" } });
+  await unlock(page);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+  const logins = stub.calls.login;
+
+  await openSettings(page);
+  await page.click("#settings-logout");
+  await page.clock.runFor(1_000);
+  await page.click("#settings-logout");
+
+  await expect(page.locator("#setup")).toBeVisible();
+  await expect(page.locator("#banner")).toBeHidden();
+  await page.clock.runFor(2 * 60 * 60_000);
+  await page.waitForTimeout(150);
+  expect(stub.calls.login).toBe(logins);
+});
+
+test("a swipe while LOGGED OUT changes the view without retrying the login", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  stub.read = dexcomFailure("SessionNotValid");
+  stub.login = dexcomFailure("AccountPasswordInvalid");
+  await unlock(page);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+  expect(stub.calls.login).toBe(2);
+
+  await swipe(page, 300, 100);
+  await expect(page.locator("body")).toHaveClass(/layout-compact/);
+  await swipe(page, 300, 100);
+  await swipe(page, 300, 100);
+  await expect(page.locator("body")).toHaveClass(/layout-settings/);
+  await page.waitForTimeout(150);
+
+  expect(stub.calls.login).toBe(2);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+
+  await swipe(page, 100, 300);
+  await swipe(page, 100, 300);
+  await swipe(page, 100, 300);
+  await expect(page.locator("body")).not.toHaveClass(/layout-/);
+  await swipe(page, 300, 300);
+  await expect.poll(() => stub.calls.login).toBe(3);
+});
+
+test("a tap on the settings screen while LOGGED OUT does not retry the login", async ({ page }) => {
+  const stub = await stubDexcom(page);
+  await page.goto("/");
+  await connect(page);
+  await expect(page.locator("#glucose")).toHaveText("16.9");
+  stub.read = dexcomFailure("SessionNotValid");
+  stub.login = dexcomFailure("AccountPasswordInvalid");
+  await unlock(page);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
+  expect(stub.calls.login).toBe(2);
+
+  await openSettings(page);
+  await page.click("#settings-account");
+  await page.waitForTimeout(150);
+
+  expect(stub.calls.login).toBe(2);
+  await expect(page.locator("#banner")).toContainText("LOGGED OUT");
 });

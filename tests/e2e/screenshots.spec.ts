@@ -10,7 +10,7 @@ test("capture the README screenshots", async ({ page }) => {
   await connect(page);
   await expect(page.locator("#glucose")).toHaveText("6.6");
 
-  for (const layout of ["full", "compact", "focus"]) {
+  for (const layout of ["full", "compact", "focus", "settings"]) {
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await page.screenshot({ path: `docs/screenshots/${layout}.png`, animations: "disabled" });
     await page.keyboard.press("ArrowRight");

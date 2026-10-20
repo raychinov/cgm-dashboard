@@ -4,13 +4,17 @@ import {
   colorHex,
   formatDelta,
   formatGlucose,
+  fromDisplayUnit,
   graphRange,
   nextFetchDelay,
   nextLagEstimate,
   normalizeReadings,
   parseDexcomDate,
+  parseSettings,
   summarize,
+  toDisplayUnit,
   trendArrow,
+  validThresholds,
 } from "../display.js";
 
 const thresholds = { urgentLow: 70, low: 81, high: 162, urgentHigh: 180 };
@@ -191,5 +195,58 @@ describe("graphRange", () => {
     expect(graphRange([{ ts: 1, mgdl: 120, trend: 4 }], thresholds)).toEqual({ yMin: 36, yMax: 200 });
     expect(graphRange([{ ts: 1, mgdl: 300, trend: 4 }], thresholds)).toEqual({ yMin: 36, yMax: 320 });
     expect(graphRange([], thresholds)).toEqual({ yMin: 36, yMax: 200 });
+  });
+});
+
+describe("settings", () => {
+  const defaults = { units: "mmol", thresholds };
+
+  it("validates thresholds as finite, in range and strictly increasing", () => {
+    expect(validThresholds(thresholds)).toBe(true);
+    expect(validThresholds({ ...thresholds, low: 70 })).toBe(false);
+    expect(validThresholds({ ...thresholds, high: 60 })).toBe(false);
+    expect(validThresholds({ ...thresholds, urgentLow: 39 })).toBe(false);
+    expect(validThresholds({ ...thresholds, urgentLow: 40 })).toBe(true);
+    expect(validThresholds({ ...thresholds, urgentHigh: 401 })).toBe(false);
+    expect(validThresholds({ ...thresholds, urgentHigh: 400 })).toBe(true);
+    expect(validThresholds({ ...thresholds, high: NaN })).toBe(false);
+    expect(validThresholds({ ...thresholds, high: "162" })).toBe(false);
+    expect(validThresholds({ urgentLow: 70, low: 81, high: 162 })).toBe(false);
+    expect(validThresholds(null)).toBe(false);
+  });
+
+  it("falls back to the defaults for missing or broken storage", () => {
+    expect(parseSettings(null, defaults)).toEqual(defaults);
+    expect(parseSettings("not json", defaults)).toEqual(defaults);
+    expect(parseSettings("[]", defaults)).toEqual(defaults);
+    expect(parseSettings(JSON.stringify({ units: "lbs", thresholds: { low: 1 } }), defaults)).toEqual(defaults);
+  });
+
+  it("keeps a valid stored value per field and drops extras", () => {
+    const stored = { units: "mgdl", thresholds: { ...thresholds, urgentHigh: 250, extra: 1 } };
+    expect(parseSettings(JSON.stringify(stored), defaults)).toEqual({ units: "mgdl", thresholds: { ...thresholds, urgentHigh: 250 } });
+    expect(parseSettings(JSON.stringify({ units: "mgdl" }), defaults)).toEqual({ units: "mgdl", thresholds });
+    expect(parseSettings(JSON.stringify({ thresholds: { ...thresholds, low: 70 } }), defaults)).toEqual(defaults);
+    expect(parseSettings(JSON.stringify(defaults), defaults).thresholds).not.toBe(defaults.thresholds);
+  });
+
+  it("converts thresholds to and from the display unit", () => {
+    expect(toDisplayUnit(81, "mmol")).toBe(4.5);
+    expect(toDisplayUnit(70, "mmol")).toBe(3.9);
+    expect(toDisplayUnit(162, "mgdl")).toBe(162);
+    expect(fromDisplayUnit("4.5", "mmol")).toBe(81);
+    expect(fromDisplayUnit("10", "mmol")).toBe(180);
+    expect(fromDisplayUnit("162.4", "mgdl")).toBe(162);
+    expect(fromDisplayUnit("4,5", "mmol")).toBe(81);
+    expect(fromDisplayUnit(" 7 ", "mmol")).toBe(126);
+    expect(fromDisplayUnit("", "mmol")).toBeNaN();
+    expect(fromDisplayUnit("abc", "mgdl")).toBeNaN();
+  });
+
+  it("round-trips every one-decimal mmol/L value through integer mg/dL", () => {
+    for (let tenths = 20; tenths <= 300; tenths++) {
+      const mmol = tenths / 10;
+      expect(toDisplayUnit(fromDisplayUnit(String(mmol), "mmol"), "mmol")).toBe(mmol);
+    }
   });
 });

@@ -18,7 +18,7 @@
 </head>
 <body>
 <div id="setup">
-  <form id="setup-form">
+  <form id="setup-form" class="form">
     <h1>CGM Dashboard</h1>
     <p class="hint">Use the same account as the Dexcom mobile app. Credentials stay in this browser and go straight to Dexcom &mdash; there is no server in between.</p>
     <label for="setup-username">Dexcom username</label>
@@ -48,6 +48,31 @@
   <div id="graph-container"><canvas id="graph"></canvas></div>
   <div id="x-labels"><span>-3h</span><span>-2h</span><span>-1h</span><span>now</span></div>
 </div>
+<section id="settings">
+  <form id="settings-form" class="form">
+    <h1>Settings</h1>
+    <p class="hint" id="settings-account"></p>
+    <fieldset>
+      <legend>Units</legend>
+      <div class="segmented" id="settings-units">
+        <label><input type="radio" name="units" value="mmol"><span>mmol/L</span></label>
+        <label><input type="radio" name="units" value="mgdl"><span>mg/dL</span></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Thresholds in <span id="settings-unit-label"></span></legend>
+      <div class="thresholds">
+        <label for="threshold-urgentLow">Urgent low<input id="threshold-urgentLow" type="text" inputmode="decimal" autocomplete="off" data-key="urgentLow"></label>
+        <label for="threshold-low">Low<input id="threshold-low" type="text" inputmode="decimal" autocomplete="off" data-key="low"></label>
+        <label for="threshold-high">High<input id="threshold-high" type="text" inputmode="decimal" autocomplete="off" data-key="high"></label>
+        <label for="threshold-urgentHigh">Urgent high<input id="threshold-urgentHigh" type="text" inputmode="decimal" autocomplete="off" data-key="urgentHigh"></label>
+      </div>
+    </fieldset>
+    <div class="error-msg" id="settings-error" role="alert"></div>
+    <button id="settings-logout" type="button">Log out</button>
+    <p class="hint">Swipe left or right to go back to the dashboard.</p>
+  </form>
+</section>
 <video id="nosleep" playsinline loop muted></video>
 <script type="module" src="./app.js"></script>
 </body>

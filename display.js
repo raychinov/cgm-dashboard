@@ -96,3 +96,39 @@ export function graphRange(readings, thresholds) {
   const peak = readings.reduce((max, r) => Math.max(max, r.mgdl), thresholds.urgentHigh);
   return { yMin: GRAPH_Y_MIN, yMax: peak + GRAPH_Y_HEADROOM };
 }
+
+const THRESHOLD_KEYS = ["urgentLow", "low", "high", "urgentHigh"];
+const THRESHOLD_MIN_MGDL = 40;
+const THRESHOLD_MAX_MGDL = 400;
+const UNITS = new Set(["mmol", "mgdl"]);
+
+export function validThresholds(t) {
+  if (!t || typeof t !== "object") return false;
+  const values = THRESHOLD_KEYS.map((key) => t[key]);
+  if (!values.every((v) => Number.isFinite(v) && v >= THRESHOLD_MIN_MGDL && v <= THRESHOLD_MAX_MGDL)) return false;
+  return values.every((v, i) => i === 0 || v > values[i - 1]);
+}
+
+export function parseSettings(raw, defaults) {
+  let stored = null;
+  try {
+    stored = raw ? JSON.parse(raw) : null;
+  } catch {}
+  if (!stored || typeof stored !== "object") stored = {};
+  const units = UNITS.has(stored.units) ? stored.units : defaults.units;
+  const thresholds = validThresholds(stored.thresholds)
+    ? Object.fromEntries(THRESHOLD_KEYS.map((key) => [key, stored.thresholds[key]]))
+    : { ...defaults.thresholds };
+  return { units, thresholds };
+}
+
+export function toDisplayUnit(mgdl, units) {
+  return units === "mmol" ? Number(mgdlToMmol(mgdl).toFixed(1)) : Math.round(mgdl);
+}
+
+export function fromDisplayUnit(value, units) {
+  const text = String(value).trim().replace(",", ".");
+  const n = text === "" ? NaN : Number(text);
+  if (!Number.isFinite(n)) return NaN;
+  return Math.round(units === "mmol" ? n * 18 : n);
+}

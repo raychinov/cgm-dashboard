@@ -40,12 +40,12 @@ design possible. There is no build step and no server component.
 |------|------|
 | `index.html` | Markup, meta tags, CSP, icon and manifest links. |
 | `icons/`, `manifest.webmanifest` | App icon (`icon.svg` is the source; the PNGs are renders of it at 32, 180, 192 and 512 px, full square because iOS and Android mask the corners) and the web app manifest for "Add to Home screen". |
-| `style.css` | Layouts, the portrait/landscape orientation query, night mode, setup form. |
-| `app.js` | DOM wiring: setup, refresh scheduling, wake lock, banners, graph, gestures. `CONFIG` at the top. |
-| `display.js` | Pure functions, no DOM: units, bands, trend arrows, reading normalisation, age/delta/stale summary, graph range, fetch timing. Put new logic here so it can be tested. |
+| `style.css` | Layouts, the portrait/landscape orientation query, night mode, the shared `.form` styles of the setup and settings forms, the settings view. |
+| `app.js` | DOM wiring: setup, refresh scheduling, wake lock, banners, graph, gestures, the settings view (`cgm.settings`, log out). `CONFIG` at the top holds the defaults. |
+| `display.js` | Pure functions, no DOM: units, bands, trend arrows, reading normalisation, age/delta/stale summary, graph range, fetch timing, settings parsing/validation and unit conversion. Put new logic here so it can be tested. |
 | `dexcom-client.js` | Dexcom auth flow, session cache (`cgm.session`, kept until Dexcom rejects it), account-id cache (`cgm.account`, keyed by username and region, so a re-login is one call instead of two), login pause (`cgm.loginPause`), error classification, retry-once on session errors. |
 | `tests/*.test.ts` | vitest suites for `display.js` and `dexcom-client.js`; `setup.ts` stubs `localStorage`. |
-| `tests/e2e/` | Playwright: `dexcom.ts` intercepts the Dexcom hosts with fixtures; `dashboard.spec.ts` covers setup, errors, layouts, banners, reset, scheduling; `layout.spec.ts` checks every landscape phone/tablet viewport for overflow and against the snapshots in `__snapshots__/`; `screenshots.spec.ts` (only via `npm run screenshots`) renders the README images. Playwright answers CORS preflights itself, so the suite cannot detect Dexcom dropping CORS; that stays a manual curl. |
+| `tests/e2e/` | Playwright: `dexcom.ts` intercepts the Dexcom hosts with fixtures; `dashboard.spec.ts` covers setup, errors, layouts, banners, settings, log out, scheduling; `layout.spec.ts` checks every landscape phone/tablet viewport for overflow (the settings form must be reachable by scrolling) and against the snapshots in `__snapshots__/`; `screenshots.spec.ts` (only via `npm run screenshots`) renders the README images. Playwright answers CORS preflights itself, so the suite cannot detect Dexcom dropping CORS; that stays a manual curl. |
 
 ## Run
 
@@ -111,9 +111,23 @@ first checked by the next ordinary push.
   replace any of it with a fixed interval.
 - **No blocking overlay, no log-out gesture.** With stored credentials
   the dashboard starts fetching at once; the first touch only requests
-  fullscreen and the wake lock (the "tap for fullscreen" chip). There
-  is deliberately no way to log out from the page; a dedicated screen
-  with confirmation is the only acceptable way to add one.
+  fullscreen and the wake lock (the "tap for fullscreen" chip). Log out
+  lives only on the settings view (the fourth entry of `LAYOUTS`,
+  reached by swipe or arrow key) and needs a second tap within 5 s
+  (`logoutConfirmMs`) but not within 600 ms (`logoutMinGapMs`), so a
+  double tap is not a confirmation. `onGesture` ignores taps inside
+  `#settings` or `#setup`, and swipes are never taps, so neither can
+  trigger fullscreen or the LOGGED OUT retry; arrow keys inside a form
+  field never switch views.
+- **Settings are device state, not account state.** `cgm.settings`
+  (units, thresholds in integer mg/dL) survives log-out; `parseSettings`
+  falls back to `CONFIG` per field, so a broken value can never leave
+  the page without thresholds. Thresholds are edited in the display
+  unit and applied on `change`, not `input`; only the changed field is
+  converted, the other three keep their stored mg/dL, so rounding
+  cannot drift them. An out-of-order set is refused and leaves storage
+  untouched. The inputs are `type="text" inputmode="decimal"` so a
+  comma-decimal keyboard works; `fromDisplayUnit` accepts the comma.
 - **Keep-awake has two layers.** The Screen Wake Lock sentinel is
   re-requested on `release`; the fallback is a real 1 s black MP4
   (`SILENT_MP4`, generated with ffmpeg). An MP4 without a media track
@@ -153,4 +167,4 @@ first checked by the next ordinary push.
 
 ## Follow-ups
 
-- In-browser settings for thresholds, units and the night window.
+- In-browser setting for the night window.

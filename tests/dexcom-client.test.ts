@@ -239,6 +239,35 @@ describe("getSession cache", () => {
   });
 });
 
+describe("getSession superseded by clearCreds", () => {
+  it("does not cache a session or account id when the credentials were cleared during the login", async () => {
+    let finishLogin: (r: Response) => void = () => {};
+    fetchMock.mockResolvedValueOnce(json("acct-1")).mockReturnValueOnce(new Promise((resolve) => { finishLogin = resolve; }));
+    const pending = client.getSession(creds);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    client.clearCreds();
+    finishLogin(json("sess-1"));
+
+    await expect(pending).resolves.toBe("sess-1");
+    expect(localStorage.getItem("cgm.session")).toBeNull();
+    expect(localStorage.getItem("cgm.account")).toBeNull();
+  });
+
+  it("does not pause logins for a failure that belongs to cleared credentials", async () => {
+    let finishLogin: (r: Response) => void = () => {};
+    fetchMock.mockResolvedValueOnce(json("acct-1")).mockReturnValueOnce(new Promise((resolve) => { finishLogin = resolve; }));
+    const pending = client.getSession(creds);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    client.clearCreds();
+    finishLogin(json("<html>unavailable</html>", 503));
+
+    await expect(pending).rejects.toBeInstanceOf(client.DexcomError);
+    expect(localStorage.getItem("cgm.loginPause")).toBeNull();
+  });
+});
+
 describe("getReadings", () => {
   it("re-authenticates and retries once on SessionNotValid", async () => {
     cacheSession("stale-session");

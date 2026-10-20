@@ -62,12 +62,19 @@ Home Screen* (below) instead.
 - **Stand the phone in landscape.** The layouts are designed and tested
   for landscape phones and tablets. Portrait still works but is not
   tuned.
-- **Swipe left or right** (or press the arrow keys) to switch layouts:
+- **Swipe left or right** (or press the arrow keys) to switch views:
 
-  | Full | Compact | Focus |
-  |---|---|---|
-  | ![Full layout](docs/screenshots/full.png) | ![Compact layout](docs/screenshots/compact.png) | ![Focus layout](docs/screenshots/focus.png) |
-  | Clock, reading, 3-hour graph | Clock and reading | Reading, change and age, as large as the screen allows |
+  | Full | Compact | Focus | Settings |
+  |---|---|---|---|
+  | ![Full layout](docs/screenshots/full.png) | ![Compact layout](docs/screenshots/compact.png) | ![Focus layout](docs/screenshots/focus.png) | ![Settings](docs/screenshots/settings.png) |
+  | Clock, reading, 3-hour graph | Clock and reading | Reading, change and age, as large as the screen allows | Units, thresholds, log out |
+
+- **Settings** is the fourth view. Pick **mmol/L** or **mg/dL**, and set
+  the four thresholds that colour the number and the graph bands (urgent
+  low, low, high, urgent high, in the chosen unit). A change applies
+  when you leave the field and is kept on the phone. **Log out** needs
+  two separate taps; it forgets the Dexcom login and shows the setup
+  form again. The thresholds and units stay.
 
 - After a reboot or a browser restart, open the dashboard again and it
   resumes by itself; tap once for fullscreen.
@@ -75,8 +82,8 @@ Home Screen* (below) instead.
 - If Dexcom rejects the saved login (a changed password, a locked
   account), the banner says **LOGGED OUT** with the reason, polling
   stops so the account cannot be locked, and a tap retries once. To
-  change the credentials, clear the site's data in the phone's browser
-  settings and open the page again.
+  change the credentials, swipe to **Settings**, log out, and set up
+  again.
 - Dexcom publishes a reading every 5 minutes. The page asks for it the
   moment it is due and retries every 5 seconds for up to 3 minutes,
   then once a minute (every 2 minutes at night). A new reading
@@ -123,7 +130,7 @@ charging at 80% if the phone supports it.
 | *Connected, but Dexcom returned no readings* | You used a follower's login. A follower account logs in fine but has no readings of its own; use the account signed in on the phone with the sensor. Otherwise sharing is off, has no follower, or that phone is offline. |
 | *NO DATA* after it worked | A temporary hiccup. It retries by itself. If it stays, check the Dexcom app. |
 | *NO DATA · logins paused N min* | Dexcom's login service answered with an error. The page waits before sending the password again (5, then 15, then 60 minutes). |
-| *LOGGED OUT · …* | Dexcom rejected the saved login. Polling has stopped. Tap to retry once; if the password changed, clear the site's data and set up again. |
+| *LOGGED OUT · …* | Dexcom rejected the saved login. Polling has stopped. Tap to retry once; if the password changed, log out from **Settings** and set up again. |
 | *Dexcom error: …* | Dexcom answered with something unexpected. Try again in a minute; if it persists, open an issue with the code shown. |
 | *STALE (N min)*, number turns grey | Dexcom has not published a new reading for N minutes. Usually the sensor phone lost its connection. The last reading stays on screen, greyed, however old it gets. |
 
@@ -135,8 +142,8 @@ other destination. Your Dexcom username and password are stored in
 plain text in the phone browser's local storage so the page can log in
 again after a reload. That means:
 
-- Anyone who can unlock the phone can use the dashboard. There is no
-  log-out button; clear the site's data in the browser settings before
+- Anyone who can unlock the phone can use the dashboard, and can log
+  it out from the Settings view (two taps, no password). Log out before
   handing the phone to someone else.
 - On GitHub Pages, local storage belongs to the whole `<account>.github.io`
   origin, so any other Pages site published under the same account
@@ -157,11 +164,11 @@ npm run typecheck
 npm run dev              # http://localhost:8787
 ```
 
-Glucose thresholds and the night-mode window are constants in `CONFIG`
-at the top of `app.js`. The display is mmol/L by default; set
-`units: "mgdl"` for mg/dL. The thresholds are always in mg/dL
-(urgent low 70, low 81, high 162, urgent high 180) whatever the display
-unit. Regenerate the README screenshots with `npm run screenshots`.
+Units and glucose thresholds are set on the Settings view and stored in
+the browser (`cgm.settings`, thresholds in mg/dL). Their defaults
+(mmol/L; urgent low 70, low 81, high 162, urgent high 180 mg/dL) and
+the night-mode window are constants in `CONFIG` at the top of `app.js`.
+Regenerate the README screenshots with `npm run screenshots`.
 
 ## License
 

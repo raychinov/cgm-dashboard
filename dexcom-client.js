@@ -130,7 +130,10 @@ function readJson(key) {
   }
 }
 
+let generation = 0;
+
 export function invalidateSession() {
+  generation++;
   localStorage.removeItem(SESSION_KEY);
 }
 
@@ -160,11 +163,13 @@ export async function getSession(creds) {
     throw err;
   }
   const knownAccountId = cachedAccountId(creds);
+  const startedIn = generation;
   let accountId, sessionId;
   try {
     accountId = knownAccountId ?? (await authenticate(creds));
     sessionId = await loginById(accountId, creds);
   } catch (err) {
+    if (startedIn !== generation) throw err;
     if (err instanceof DexcomError) {
       if (err.isAuthError) {
         if (knownAccountId) localStorage.removeItem(ACCOUNT_KEY);
@@ -174,6 +179,7 @@ export async function getSession(creds) {
     }
     throw err;
   }
+  if (startedIn !== generation) return sessionId;
   localStorage.removeItem(PAUSE_KEY);
   localStorage.setItem(ACCOUNT_KEY, JSON.stringify({ username: creds.username, server: creds.server, accountId }));
   localStorage.setItem(SESSION_KEY, JSON.stringify({ id: sessionId, username: creds.username, server: creds.server, createdAt: Date.now() }));
@@ -208,6 +214,7 @@ export function setCreds(creds) {
 }
 
 export function clearCreds() {
+  generation++;
   localStorage.removeItem(CREDS_KEY);
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(ACCOUNT_KEY);

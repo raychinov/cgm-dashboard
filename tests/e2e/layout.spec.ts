@@ -3,6 +3,23 @@ import { BASE_TIME, LANDSCAPE_VIEWPORTS, RISING, WIDE, connect, readings, stubDe
 
 const LAYOUTS = ["full", "compact", "focus"] as const;
 
+function settingsProblems() {
+  const W = innerWidth, H = innerHeight;
+  const problems: string[] = [];
+  const panel = document.getElementById("settings")!;
+  if (panel.scrollWidth > panel.clientWidth + 1) problems.push("settings scroll horizontally");
+  if (panel.scrollHeight > panel.clientHeight + 1 && !/auto|scroll/.test(getComputedStyle(panel).overflowY)) problems.push("settings taller than the screen but not scrollable");
+  for (const el of document.querySelectorAll<HTMLElement>("#settings-form input, #settings-form button, #settings-form label, #settings-form legend")) {
+    el.scrollIntoView({ block: "nearest" });
+    const b = el.getBoundingClientRect();
+    if (b.left < -1 || b.right > W + 1) problems.push(`${el.id || el.tagName.toLowerCase()} outside viewport horizontally`);
+    if (b.top < -1 || b.bottom > H + 1) problems.push(`${el.id || el.tagName.toLowerCase()} not reachable by scrolling`);
+    if (el.scrollWidth > el.clientWidth + 1) problems.push(`${el.id || el.tagName.toLowerCase()} text clipped`);
+  }
+  panel.scrollTop = 0;
+  return problems;
+}
+
 function layoutProblems() {
   const W = innerWidth, H = innerHeight;
   const ids = ["clock-time", "clock-date", "glucose-row", "glucose", "trend", "meta", "banner", "graph-container", "x-labels"];
@@ -50,6 +67,9 @@ for (const vp of LANDSCAPE_VIEWPORTS) {
           expect(await page.evaluate(layoutProblems), `${vp.name} ${layout}`).toEqual([]);
           await page.keyboard.press("ArrowRight");
         }
+        await expect(page.locator("body")).toHaveClass(/layout-settings/);
+        await settled(page);
+        expect(await page.evaluate(settingsProblems), `${vp.name} settings`).toEqual([]);
       });
     }
 
@@ -60,7 +80,7 @@ for (const vp of LANDSCAPE_VIEWPORTS) {
       await connect(page);
       await expect(page.locator("#glucose")).toHaveText("16.9");
 
-      for (const layout of LAYOUTS) {
+      for (const layout of [...LAYOUTS, "settings"]) {
         await settled(page);
         await expect(page).toHaveScreenshot(`${vp.name}-${layout}.png`, { animations: "disabled" });
         await page.keyboard.press("ArrowRight");
