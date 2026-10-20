@@ -138,8 +138,11 @@ first checked by the next ordinary push.
   unit and applied on `change`, not `input`; only the changed field is
   converted, the other three keep their stored mg/dL, so rounding
   cannot drift them. An out-of-order set is refused and leaves storage
-  untouched. The inputs are `type="text" inputmode="decimal"` so a
-  comma-decimal keyboard works; `fromDisplayUnit` accepts the comma.
+  untouched. The inputs are plain `type="text"` on purpose: the iOS
+  decimal keypad (`inputmode="decimal"`) showed a "." key that inserted
+  nothing on an iPhone with a comma region, and `type="number"` has the
+  same bug in reverse, while the standard keyboard's "." works.
+  `fromDisplayUnit` accepts both "." and ",".
 - **Keep-awake has two layers.** The Screen Wake Lock sentinel is
   re-requested on `release`; the fallback is a real 1 s black MP4
   (`SILENT_MP4`, generated with ffmpeg). An MP4 without a media track
