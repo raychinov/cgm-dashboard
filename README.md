@@ -150,10 +150,11 @@ again after a reload. That means:
 
 ```bash
 npm install
-npm test            # unit tests
-npm run test:e2e    # browser tests with stubbed Dexcom (needs Google Chrome)
+npm test                 # unit tests
+npm run test:e2e         # browser tests with stubbed Dexcom, same Docker image as CI
+npm run test:e2e:chrome  # the same tests in the installed Google Chrome, no snapshots
 npm run typecheck
-npm run dev         # http://localhost:8787
+npm run dev              # http://localhost:8787
 ```
 
 Glucose thresholds and the night-mode window are constants in `CONFIG`

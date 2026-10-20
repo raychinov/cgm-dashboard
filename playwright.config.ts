@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const onCi = Boolean(process.env.CI) && !process.env.ACT;
+const onCi = Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -8,7 +8,7 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: "list",
-  grepInvert: onCi || process.env.SNAPSHOTS ? undefined : /visual snapshot/,
+  grepInvert: onCi ? undefined : /visual snapshot/,
   snapshotPathTemplate: "{testDir}/__snapshots__/{testFilePath}/{arg}{ext}",
   use: {
     baseURL: "http://127.0.0.1:8787",

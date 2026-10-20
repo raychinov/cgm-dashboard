@@ -11,8 +11,10 @@
     "dev": "serve -l 8787 .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:snapshots": "SNAPSHOTS=1 playwright test tests/e2e/layout.spec.ts",
+    "test:e2e": "docker run --rm --ipc=host -u \"$(id -u):$(id -g)\" -e HOME=/tmp -e CI=1 -v \"$PWD\":/work -w /work mcr.microsoft.com/playwright:v$(node -p \"require('@playwright/test/package.json').version\")-noble npx playwright test",
+    "test:e2e:chrome": "playwright test",
+    "snapshots:update": "node \"$npm_execpath\" run test:e2e -- tests/e2e/layout.spec.ts --update-snapshots",
+    "check:playwright-image": "grep -q \"playwright:v$(node -p \"require('@playwright/test/package.json').version\")-noble\" .github/workflows/ci.yml",
     "screenshots": "SCREENSHOTS=1 playwright test tests/e2e/screenshots.spec.ts",
     "typecheck": "tsc"
   },

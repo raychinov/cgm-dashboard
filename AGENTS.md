@@ -51,36 +51,39 @@ design possible. There is no build step and no server component.
 
 ```bash
 npm install
-npm test             # unit tests
-npm run test:e2e     # Playwright against the installed Google Chrome
+npm test                 # unit tests
+npm run test:e2e         # the CI run: Playwright Docker image, bundled Chromium, snapshots compared
+npm run test:e2e:chrome  # quick run against the installed Google Chrome, snapshots skipped
+npm run snapshots:update # re-render tests/e2e/__snapshots__ in that image
 npm run typecheck
-npm run dev          # static server on :8787; hits real Dexcom from the browser
+npm run dev              # static server on :8787; hits real Dexcom from the browser
 ```
 
 No mock mode in production code. The Playwright suite intercepts the
 Dexcom hosts with `page.route` and serves fixtures from
 `tests/e2e/dexcom.ts`; to work on the UI without an account, run
-`npx playwright test --ui` or `--headed` and pick a test.
+`npm run test:e2e:chrome -- --ui` or `--headed` and pick a test.
 
-**Snapshots are owned by CI.** The PNGs in `tests/e2e/__snapshots__`
-are rendered on the `ubuntu-latest` runner and compared there on every
-push; the comparison is skipped locally because fonts differ between
-machines (`npm run test:e2e:snapshots` forces it). After a deliberate
-visual change, don't regenerate them locally: run the CI workflow with
-the `update_snapshots` input (`gh workflow run ci.yml -f
-update_snapshots=true --ref <branch>`), which re-renders them on the
-runner in a separate job with write access and pushes a commit to that
-branch. Review that commit's PNGs. GitHub only offers the dispatch once
-the workflow file exists on `main`, so the very first run on a fresh
-repo will fail the snapshot step until that dispatch has happened.
+**Snapshots are rendered in one container, everywhere.** The PNGs in
+`tests/e2e/__snapshots__` only match when browser build and fonts are
+identical, so both CI jobs run inside
+`mcr.microsoft.com/playwright:v<playwright version>-noble` and
+`npm run test:e2e` runs the same image on a dev machine (Docker
+required). `npm run test:e2e:chrome` uses the installed Google Chrome
+and skips the snapshot comparison, because fonts and browser build
+differ from the image; use it for quick iteration, `--headed` and
+`--ui`. After a deliberate visual change run `npm run
+snapshots:update`, review the PNGs and commit them. The image tag in
+`ci.yml` must match the installed `@playwright/test` version;
+`npm run check:playwright-image` fails the CI run when they drift, so
+bump both together.
 
-To run the workflow locally: `gh act push` (act as a `gh` extension,
-Docker required). act's image is not GitHub's, so under act the
-snapshot comparison is skipped (`ACT` is set); the snapshots job never
-runs there because it only runs on a manual dispatch. Everything else
-runs as on GitHub. The bot's push uses the Actions token, which does
-not start a new run, so the re-rendered snapshots are first checked by
-the next ordinary push.
+The `update_snapshots` workflow dispatch (`gh workflow run ci.yml -f
+update_snapshots=true --ref <branch>`) still exists for a machine
+without Docker: it re-renders the PNGs in the same image in a job with
+write access and pushes a commit to that branch. Its push uses the
+Actions token, which does not start a new run, so those snapshots are
+first checked by the next ordinary push.
 
 ## Traps
 
